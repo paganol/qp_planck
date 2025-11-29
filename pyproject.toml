@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "qp-planck"
+version = "0.1.0"
+description = "QuickPol-based tools for Planck NPIPE beam window functions."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+
+authors = [
+  { name = "Your Name", email = "you@example.com" },
+]
+
+# Adjust these if you want to publish to PyPI later
+keywords = ["planck", "npipe", "quickpol", "cmb", "cosmology"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Astronomy",
+  "Topic :: Scientific/Engineering :: Physics",
+]
+
+# Runtime dependencies – tweak versions as needed
+dependencies = [
+  "numpy>=1.20",
+  "scipy>=1.6",
+  "astropy>=5.0",
+  "healpy>=1.15",
+]
+
+[project.optional-dependencies]
+# Optional MPI support
+mpi = [
+  "mpi4py>=3.0",
+]
+
+[project.urls]
+homepage = "https://example.com/qp-planck"
+repository = "https://example.com/qp-planck.git"
+
+[tool.hatch.build.targets.wheel]
+# We’re using the package directory qp_planck/ as-is (no src/ layout)
+packages = ["qp_planck"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "qp_planck",
+  "README.md",
+  "pyproject.toml",
+]
