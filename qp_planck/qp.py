@@ -1,3 +1,16 @@
+"""
+QuickPol driver for Planck NPIPE beam matrices.
+
+DISCLAIMER
+----------
+This file contains code adapted from the Planck NPIPE / QuickPol pipeline:
+    https://github.com/planck-npipe/toast-npipe/tree/master
+
+The original implementation relied on TOAST and internal Planck tooling.
+This version removes TOAST dependencies and is intended to be used as a
+standalone driver to compute effective beam matrices for Planck NPIPE.
+"""
+
 # Optional MPI via mpi4py; fall back to serial execution if not available.
 try:
     from mpi4py import MPI
@@ -16,17 +29,24 @@ import getopt
 import os
 import sys
 import time
+
 import numpy as np
 import numpy.linalg as LA
 import scipy.interpolate as inter
+
 import astropy.io.fits as pyfits
 import healpy as hp
-from utilities import (load_RIMO, list_planck, detector_weights,
-                          qp_file)
+
+from utilities import (
+    load_RIMO,
+    list_planck,
+    detector_weights,
+    qp_file,
+)
 
 """
 
-qprun_npipe.py and qp2fits_npipe.py are adapted from QuickPol. See 
+qprun_npipe.py and qp2fits_npipe.py are adapted from QuickPol. See
     E. Hivon, S. Mottet and N. Ponthieu,
     "QuickPol: Fast calculation of effective beam matrices for CMB polarization",
     A&A (2017) 598 A25
@@ -69,7 +89,7 @@ qprun_npipe.py and qp2fits_npipe.py are adapted from QuickPol. See
          +--parse_detname
          +--fill_beam_dict
               +--my_create_bololist_w8
-              +--efh.get_angles
+              +--get_angles
               +--get_blm_det
               +--get_gblm_det
          +--make_hit_matrix
@@ -79,7 +99,7 @@ qprun_npipe.py and qp2fits_npipe.py are adapted from QuickPol. See
                   +--my_create_bololist_w8
                   +--count_pix
                   +--get_wsmap_det
-                       +--efh.get_angles
+                       +--get_angles
                        +--count_pix
                   +--invert_hit
                        +--invert_hit_sub
@@ -100,19 +120,19 @@ fn_rimo_hfi = os.path.join(auxdir, 'RIMOs/RIMO_HFI_npipe5v16_symmetrized.fits')
 hitgrpfull = os.path.join(auxdir, 'polmoments')
 blmdir = os.path.join(auxdir, 'beams')
 outdir = '../quickpol_output'
-#blmfile_lfi = blmdir + 'mb_lfi_{}_dx12_smear.alm'
-#blmfile_hfi = blmdir + 'BS_HBM_DX11v67_I5_HIGHRES_POLAR_{}_xp_alm.fits'
+# blmfile_lfi = blmdir + 'mb_lfi_{}_dx12_smear.alm'
+# blmfile_hfi = blmdir + 'BS_HBM_DX11v67_I5_HIGHRES_POLAR_{}_xp_alm.fits'
 blmfile = blmdir + '/blm_{}.fits'
 blm_ref = 'Dxx'
 spin_ref = 'Pxx'
 release = 'npipe6v20'
 
 smax = 6
-#planet = 'Saturn'
+# planet = 'Saturn'
 planet = ''
 rhobeam = 'IMO'
 rhohit = 'IMO'
-#test = False
+# test = False
 test = True  # Only sample a small fraction of the pixels
 conserve_memory = False
 
@@ -121,7 +141,7 @@ RED_COLOR = '\x1b[31;01m'
 GREEN_COLOR = '\x1b[32;11m'
 YELLOW_COLOR = '\x1b[33;11m'
 BLUE_COLOR = '\x1b[34;11m'
-MAGENTA_COLOR  ='\x1b[35;11m'
+MAGENTA_COLOR = '\x1b[35;11m'
 CYAN_COLOR = '\x1b[36;11m'
 
 
@@ -129,15 +149,13 @@ CYAN_COLOR = '\x1b[36;11m'
 
 
 def print_matrix(matrix, l=None, ctype=''):
-    """ print_matrix()
-    prints real or complex matrix
-    """
+    """Print a 3x3 real or complex matrix, with optional label and ell."""
     if ctype != '':
         print(prefix, ctype)
     if l is not None:
-        print(prefix, ('l=%s'%(str(l))))
+        print(prefix, f'l={l}')
     for i in range(3):
-        if isinstance(matrix[0,0], np.complex128):
+        if isinstance(matrix[0, 0], np.complex128):
             v = ['%+.2e %+.2ei' % (n.real, n.imag) for n in (matrix[i])]
         else:
             v = ['%+.2e' % (n) for n in (matrix[i])]
@@ -146,11 +164,18 @@ def print_matrix(matrix, l=None, ctype=''):
     print(flush=True)
 
 
-#-------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+
 
 def proc_angle(angle):
-    """ proc_angle(angle)
-    0 -> '000', 90 -> '+90', -90 -> '-90', 180 -> '180'
+    """Format an angle in degrees as a 3-character string.
+
+    Examples
+    --------
+    0   -> '000'
+    90  -> '+90'
+    -90 -> '-90'
+    180 -> '180'
     """
     st = '%+03d' % (angle)
     st = st.replace('+180', '180')
@@ -160,6 +185,7 @@ def proc_angle(angle):
 
 
 def get_angles(RIMO, shorts, ref='Dxx'):
+    """Return detector angles (in radians) for a list of short names."""
     angles = np.zeros(len(shorts))
     for idet, det in enumerate(shorts):
         if ref == 'Dxx':
@@ -170,18 +196,20 @@ def get_angles(RIMO, shorts, ref='Dxx'):
             else:
                 angles[idet] = 0
         else:
-            raise RuntimeError('Unknown referential: {}'.format(ref))
+            raise RuntimeError(f'Unknown referential: {ref}')
     angles = np.radians(angles)
     return angles
 
 
 def my_create_bololist_w8(detset, RIMO):
-    """ shorts, w8, psb = my_create_bololist_w8(detset, IMO) 
+    """Return detector list, weights, PSB flags and rho for a detset.
+
+    shorts, w8, psb, rho = my_create_bololist_w8(detset, RIMO)
     """
     dets = list_planck(detset)
     ndet = len(dets)
     w8 = np.zeros(ndet, dtype=np.float64)
-    psb = np.zeros(ndet, dtype=np.bool)
+    psb = np.zeros(ndet, dtype=bool)
     rho = np.zeros(ndet, dtype=np.float64)
     for idet, det in enumerate(dets):
         if det[-1] in 'abMS':
@@ -199,34 +227,38 @@ def my_create_bololist_w8(detset, RIMO):
 
 
 def parse_detname(detname):
-    """ parse_detname(detname)
-        '100'    -> hitgrpfull, '100' ,''
+    """Parse detector set name.
+
+    For now this is trivial:
+        '100' -> (hitgrpfull, '100')
     """
     short = detname
     hitgrp = hitgrpfull
     return hitgrp, short
 
+
 # -----------------------------------------------------------
 
-def get_all_masks(release, dets, lmax=None):
 
+def get_all_masks(release, dets, lmax=None):
+    """Stub for mask handling: returns isotropic (no-mask) W_l."""
     masks_names = [None, None]
     masks = [None, None]
-    w_cutsky = np.ones((3, 3, lmax+1), dtype=np.float64)
+    w_cutsky = np.ones((3, 3, lmax + 1), dtype=np.float64)
     masks_means = np.ones((3, 3), dtype=np.float64)
 
     return masks, masks_names, w_cutsky, masks_means
 
+
 # -----------------------------------------------------------
 
-def get_blm_det(blmfile, det, lmax=None, mmax=None):
-    # ---------
-    # read blm
-    # ---------
 
+def get_blm_det(blmfile, det, lmax=None, mmax=None):
+    """Read beam multipoles B_lm from a FITS file."""
     isbalm = True
     renorm = True
     fitsfile = blmfile.format(det)
+
     data = pyfits.getdata(fitsfile)
     Tix = data.field(0)
     Tre = data.field(1)
@@ -245,12 +277,12 @@ def get_blm_det(blmfile, det, lmax=None, mmax=None):
               NO_COLOR, flush=True)
         polbeam_in = True
         ndb = 3
-    except:
+    except Exception:
         print(prefix, RED_COLOR, 'WARNING: Polarized Blm not found in %s'
               '' % (fitsfile), NO_COLOR, flush=True)
 
     ls = np.array(np.floor(np.sqrt(Tix - 1)), dtype=np.int64)
-    ms = Tix - ls*ls - ls - 1
+    ms = Tix - ls * ls - ls - 1
 
     if lmax is None:
         lmax = np.max(ls)
@@ -267,26 +299,24 @@ def get_blm_det(blmfile, det, lmax=None, mmax=None):
         ret[ls[idxs], ms[idxs], 2] = -((Gre[idxs] + Cim[idxs]) +
                                        1j * (Gim[idxs] - Cre[idxs]))
 
-    if isbalm == True:
+    if isbalm:
         # file is balm, so renormalize and scale.
         tfacb0 = ret[0, 0, 0]
         print(prefix, fitsfile)
-        print(prefix, 'Beam normalisation: ', det, tfacb0*np.sqrt(4*np.pi), ndb,
-              flush=True)
+        print(prefix, 'Beam normalisation: ', det,
+              tfacb0 * np.sqrt(4 * np.pi), ndb, flush=True)
         if not renorm:
             print(prefix, 'Beam NOT renormalized', flush=True)
-            tfacb0 = 1.
+            tfacb0 = 1.0
         for l in range(lmax + 1):
             for kb in range(ndb):
-                ret[l, :, kb] *= 1 / (tfacb0 * np.sqrt((2*l+1)))
+                ret[l, :, kb] *= 1 / (tfacb0 * np.sqrt((2 * l + 1)))
 
     return ret
 
 
 def get_gblm_det(RIMO, det, lmax=4000, mmax=0):
-    # ---------
-    # generate Gaussian blm
-    # ---------
+    """Generate Gaussian beam multipoles from FWHM in the RIMO."""
     print(prefix, 'In gblm')
     fwhm_am = RIMO[det].fwhm
     fwhm_rad = np.radians(fwhm_am / 60)
@@ -299,16 +329,13 @@ def get_gblm_det(RIMO, det, lmax=4000, mmax=0):
     return ret
 
 
-def fill_beam_dict(RIMO, blmfile, lmax, mmax, detset, blm_ref, angle_sdeg=0.):
-    # ----------------------
-    # create blm dictionary
-    # ----------------------
+def fill_beam_dict(RIMO, blmfile, lmax, mmax, detset, blm_ref, angle_sdeg=0.0):
+    """Create a list of beam dictionaries for all detectors in a detset."""
     short, w8, psb, rho = my_create_bololist_w8(detset, RIMO)
     # angle from input blm (Pxx or Dxx) to hat_blm (Pxx)
-    # in Radians (differ by -90 deg from
-    #             quickring.orient.get_hfi_det_orient_angles)
+    # in Radians (differ by -90 deg from quickring.orient.get_hfi_det_orient_angles)
     angles = get_angles(RIMO, short, ref=blm_ref)
-    angle_srad = np.radians(angle_sdeg)  # overall shift in Radians
+    angle_srad = np.radians(angle_sdeg)  # overall shift in radians
     print(prefix, 'detset=', detset)
     print(prefix, BLUE_COLOR, short, w8, angles, NO_COLOR, flush=True)
     nd = len(w8)
@@ -321,10 +348,18 @@ def fill_beam_dict(RIMO, blmfile, lmax, mmax, detset, blm_ref, angle_sdeg=0.):
             # Gaussian, IMO based
             blm = get_gblm_det(RIMO, det, lmax=lmax, mmax=mmax)
         # store them in a dictionary
-        d1 = {'det': det, 'angle': angles[idet],
-              'psb': psb[idet], 'w8': w8[idet], 'lmax': lmax, 'mmax': mmax,
-              'blm': blm, 'rho': rho[idet], 'ndb': np.size(blm, 2),
-              'angle_shift': angle_srad}
+        d1 = {
+            'det': det,
+            'angle': angles[idet],
+            'psb': psb[idet],
+            'w8': w8[idet],
+            'lmax': lmax,
+            'mmax': mmax,
+            'blm': blm,
+            'rho': rho[idet],
+            'ndb': np.size(blm, 2),
+            'angle_shift': angle_srad,
+        }
         print(prefix, blmfile, det, w8[idet], psb[idet], rho[idet], flush=True)
         dd.append(d1)
 
@@ -332,9 +367,7 @@ def fill_beam_dict(RIMO, blmfile, lmax, mmax, detset, blm_ref, angle_sdeg=0.):
 
 
 def bmat(bdict, l, s, rhobeam=None, verbose=False):
-    # ----------------------------------------
-    # write beam matrix (E.4) from blm dictionary
-    # ----------------------------------------
+    """Construct beam matrix (Eq. E.4 in QuickPol) from a blm dictionary."""
     mmax = bdict['mmax']
     ndb = bdict['ndb']
     sgn = np.array([1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1])[0:mmax + 1]
@@ -347,23 +380,23 @@ def bmat(bdict, l, s, rhobeam=None, verbose=False):
     phase = np.cos(mphi) + 1j * np.sin(mphi)  # e^{i m phi}
     blm = bdict['blm'][l, 0:n + 1, 0] * phase  # b_lm e^{i m mphi}
     b[n:2 * n + 1, 0] = blm[0:n + 1]
-    b[n-1::-1, 0] = np.conj((blm*sgn)[1:n + 1])
+    b[n - 1::-1, 0] = np.conj((blm * sgn)[1:n + 1])
     if ndb == 3:
         blm1 = bdict['blm'][l, 0:n + 1, 1] * phase
         blm2 = bdict['blm'][l, 0:n + 1, 2] * phase
-        b[n:2*n + 1, 1] = blm1[0:n + 1]
-        b[n:2*n + 1, 2] = blm2[0:n + 1]
-        b[n-1::-1, 1] = np.conj((blm2*sgn)[1:n + 1])
-        b[n-1::-1, 2] = np.conj((blm1*sgn)[1:n + 1])
+        b[n:2 * n + 1, 1] = blm1[0:n + 1]
+        b[n:2 * n + 1, 2] = blm2[0:n + 1]
+        b[n - 1::-1, 1] = np.conj((blm2 * sgn)[1:n + 1])
+        b[n - 1::-1, 2] = np.conj((blm1 * sgn)[1:n + 1])
 
     if rhobeam == 'Ideal':
         rho = float(bdict['psb'])  # 1 for PSB, 0 for SWB
     elif rhobeam == 'IMO':
         rho = float(bdict['rho'])
     elif isinstance(rhobeam, (int, float, complex)):
-        rho = rhobeam * 1.
+        rho = rhobeam * 1.0
     else:
-        raise RuntimeError('Unknown rhobeam type: {}'.format(rhobeam))
+        raise RuntimeError(f'Unknown rhobeam type: {rhobeam}')
 
     rhoc = rho.conjugate()
 
@@ -373,32 +406,38 @@ def bmat(bdict, l, s, rhobeam=None, verbose=False):
 
     if ndb == 1:
         b = b[:, 0]
-        bmat = np.array([
-            [     b[n+s  ],      b[n+s-2],      b[n+s+2]],
-            [rho *b[n+s+2], rho *b[n+s  ], rho *b[n+s+4]],
-            [rhoc*b[n+s-2], rhoc*b[n+s-4], rhoc*b[n+s]]])
+        bmat_ = np.array([
+            [b[n + s],      b[n + s - 2],      b[n + s + 2]],
+            [rho * b[n + s + 2], rho * b[n + s],     rho * b[n + s + 4]],
+            [rhoc * b[n + s - 2], rhoc * b[n + s - 4], rhoc * b[n + s]],
+        ])
     elif ndb == 3:
-        bmat = np.array([
-            [b[n+s, 0], b[n+s-2, 0], b[n+s+2, 0]],
-            [b[n+s, 1], b[n+s-2, 1], b[n+s+2, 1]],
-            [b[n+s, 2], b[n+s-2, 2], b[n+s+2, 2]]])
+        bmat_ = np.array([
+            [b[n + s, 0], b[n + s - 2, 0], b[n + s + 2, 0]],
+            [b[n + s, 1], b[n + s - 2, 1], b[n + s + 2, 1]],
+            [b[n + s, 2], b[n + s - 2, 2], b[n + s + 2, 2]],
+        ])
     else:
         raise RuntimeError(
             'Invalid value of ndb (polarized blm): {}, expected 1 or 3'
-            ''.format(ndb))
-    bmat *= bdict['w8']
+            ''.format(ndb)
+        )
+    bmat_ *= bdict['w8']
 
-    return bmat
+    return bmat_
 
 
 # ------------------ 3x3 matrix related ----------------------------------------
 
+
 def adjoint(matrix):
+    """Hermitian adjoint (conjugate transpose)."""
     return np.transpose(np.conjugate(matrix))
 
 
 def dots(m1, m2, m3=None, m4=None, m5=None, m6=None, m7=None, m8=None, m9=None,
          m10=None):
+    """Chain of up to 10 matrix multiplications."""
     m = np.dot(m1, m2)
     if m3 is not None:
         m = np.dot(m, m3)
@@ -420,12 +459,13 @@ def dots(m1, m2, m3=None, m4=None, m5=None, m6=None, m7=None, m8=None, m9=None,
 
 
 def interpolate_matrix(matrix, lmax, lb):
+    """Interpolate a matrix in ell using cubic interpolation."""
     n1 = np.size(matrix, 1)
     n2 = np.size(matrix, 2)
-    kind = 'cubic' # for interp1d
+    kind = 'cubic'  # for interp1d
     do_cplx = isinstance(matrix[0, 0, 0], np.complex128)
-    matout = np.zeros((lmax+1, n1, n2), dtype=type(matrix[0, 0, 0]))
-    l = np.arange(lmax+1)
+    matout = np.zeros((lmax + 1, n1, n2), dtype=type(matrix[0, 0, 0]))
+    l = np.arange(lmax + 1)
     for i in range(n1):
         for j in range(n2):
             yb = matrix[lb, i, j]
@@ -433,33 +473,33 @@ def interpolate_matrix(matrix, lmax, lb):
                 yb_i = yb.imag
                 yb = yb.real
                 f_i = inter.interp1d(lb, yb_i, kind=kind)
-                #f_i = inter.UnivariateSpline(lb, yb_i, k=3)
-                matout[l, i, j] += f_i(l) * 1.j
+                matout[l, i, j] += f_i(l) * 1j
             f_r = inter.interp1d(lb, yb, kind=kind)
-            #f_r = inter.UnivariateSpline(lb, yb, k=3)
             matout[l, i, j] += f_r(l)
     return matout
 
 
 def deconv_planet(matrix, planet='', w_cutsky=None, masks_means=None):
+    """Optionally deconvolve a planetary beam and apply cut-sky/mask effects."""
     lmax = np.size(matrix, 0) - 1
     n1 = np.size(matrix, 1)
     n2 = np.size(matrix, 2)
-    factor = 1.17741 / 60 # turns radius in arcsec into FWHM in arcmin
-    am2rad = np.radians(1 / 60) # turns arcmin into radians
+    factor = 1.17741 / 60  # turns radius in arcsec into FWHM in arcmin
+    am2rad = np.radians(1 / 60)  # turns arcmin into radians
     if planet == 'Saturn':
         #  9.50''
-        #wl_planet = qb.spectra.blm_cl(qb.blm_gauss(9.50*factor, lmax))
-        wl_planet = (hp.gauss_beam(9.50*factor*am2rad, lmax=lmax))**2
+        # wl_planet = qb.spectra.blm_cl(qb.blm_gauss(9.50*factor, lmax))
+        wl_planet = (hp.gauss_beam(9.50 * factor * am2rad, lmax=lmax)) ** 2
     else:
-        wl_planet = np.ones((lmax+1),dtype=type(1.))
+        wl_planet = np.ones((lmax + 1), dtype=type(1.0))
     print(prefix, planet + ' (2000) ', wl_planet[2000].flatten(), flush=True)
     for i in range(n1):
         for j in range(n2):
             matrix[:, i, j] /= wl_planet
 
     if w_cutsky is not None:
-        print(prefix, 'W  cut sky (2000) ', w_cutsky[:, :, 2000].flatten(), flush=True)
+        print(prefix, 'W  cut sky (2000) ', w_cutsky[:, :, 2000].flatten(),
+              flush=True)
         for i in range(n1):
             for j in range(n2):
                 matrix[:, i, j] *= w_cutsky[i, j, :]
@@ -472,13 +512,16 @@ def deconv_planet(matrix, planet='', w_cutsky=None, masks_means=None):
 
     return matrix
 
-#==============================================================
+
+# ==============================================================
 # ----- Hit matrix related ---------
-#==============================================================
+# ==============================================================
+
 
 def count_pix(pixels):
+    """Convert a pixel slice [start, stop, (optional) step] to counts."""
     if pixels is None or len(pixels) < 2 or len(pixels) > 3:
-        raise RuntimeError('Invalid pixels: {}'.format(pixels))
+        raise RuntimeError(f'Invalid pixels: {pixels}')
     nhigh = pixels[1] - pixels[0] + 1
     if len(pixels) == 3:
         skip = pixels[2]
@@ -486,11 +529,12 @@ def count_pix(pixels):
         skip = 1
     sample = (skip > 1)
     nlow = (nhigh + skip - 1) // skip
-    
+
     return nlow, nhigh, skip, sample
 
 
 def apply_hit_masks(ih, masks=None, pixels=None):
+    """Apply hit/mask maps to an inverse hit matrix ih."""
     if masks is not None:
         nlow_, nhigh_, skip, sample_ = count_pix(pixels)
         lm = len(masks)
@@ -501,7 +545,7 @@ def apply_hit_masks(ih, masks=None, pixels=None):
             mask_t = masks[0][pixels[0]:pixels[1] + 1:skip]
             mask_p = masks[1][pixels[0]:pixels[1] + 1:skip]
         else:
-            raise RuntimeError('Invalid mask dimension: {}'.format(lm))
+            raise RuntimeError(f'Invalid mask dimension: {lm}')
 
         for k in range(3):
             ih[:, 0, k] *= mask_t
@@ -516,21 +560,20 @@ def apply_hit_masks(ih, masks=None, pixels=None):
 
 def get_wsmap_det(RIMO, nside, grp, det, smax, spin_ref, pixels=None,
                   detset=None):
-    """  w(s,p,d) = sum_{t in p}  exp(i |s| psi_t_d)
-    """
+    """Compute w(s,p,d) = sum_{t in p} exp(i |s| psi_t_d) spin moments."""
     if detset in ['30A', '30B', '44A', '44B']:
         # These frequencies could not be split by detector
         subset = detset[-1]
         fitsfile1 = os.path.join(
-            grp, 'polmoments_{}_hits.{}.fits'.format(det, subset))
+            grp, f'polmoments_{det}_hits.{subset}.fits')
         fitsfile2 = os.path.join(
-            grp, 'polmoments_{}.{}.fits'.format(det, subset))
+            grp, f'polmoments_{det}.{subset}.fits')
     else:
-        fitsfile1 = os.path.join(grp, 'polmoments_{}_hits.fits'.format(det))
-        fitsfile2 = os.path.join(grp, 'polmoments_{}.fits'.format(det))
+        fitsfile1 = os.path.join(grp, f'polmoments_{det}_hits.fits')
+        fitsfile2 = os.path.join(grp, f'polmoments_{det}.fits')
     # myangle is the angle between the reference frame used for the
     # spin moments and the detector polarization-sensitive direction.
-    # Ideally, if
+    # Ideally:
     #    spin_ref == 'Dxx' then myangle = psi_uv + psi_pol
     #    spin_ref == 'Pxx' then myangle = psi_pol
     if spin_ref == 'Pxx':
@@ -543,12 +586,10 @@ def get_wsmap_det(RIMO, nside, grp, det, smax, spin_ref, pixels=None,
     print(prefix, 'nlow =', nlow, ', nhigh =', nhigh, ', skip =', skip,
           ', sample =', sample, flush=True)
 
-    wsmp = np.zeros((smax+1, nlow), dtype=np.complex128)
+    wsmp = np.zeros((smax + 1, nlow), dtype=np.complex128)
 
     t1 = time.time()
     # Use healpy read_map so map is always in RING ordering
-    #hit = pyfits.getdata(fitsfile1).field(0).flatten()
-    #spins = pyfits.getdata(fitsfile2)
     hit = hp.read_map(fitsfile1)
     spins = hp.read_map(fitsfile2, None)
     nside_hit = hp.get_nside(hit)
@@ -563,8 +604,6 @@ def get_wsmap_det(RIMO, nside, grp, det, smax, spin_ref, pixels=None,
         if s == 0:
             buf = hit
         else:
-            #buf = spins.field(2*s - 2).flatten() + \
-            #    1.j * spins.field(2*s - 1).flatten()
             buf = spins[2 * s - 2] + 1j * spins[2 * s - 1]
             if myangle != 0:
                 buf *= np.cos(s * myangle) + 1j * np.sin(s * myangle)
@@ -576,7 +615,8 @@ def get_wsmap_det(RIMO, nside, grp, det, smax, spin_ref, pixels=None,
     return wsmp
 
 
-def invert_hit_sub(matrix, thr=1.e-3, polar=True):
+def invert_hit_sub(matrix, thr=1.0e-3, polar=True):
+    """Invert the 3x3 hit sub-matrix analytically."""
     n = np.size(matrix, 0)
     nt = np.size(matrix)
     out = np.zeros((n, 3, 3), dtype=np.complex128)
@@ -596,10 +636,10 @@ def invert_hit_sub(matrix, thr=1.e-3, polar=True):
     xm = z2 * np.conjugate(z4)
     t1 = xm - x * np.conjugate(z2)
     t1c = np.conjugate(t1)
-    t2 = z2*z2 - z4
+    t2 = z2 * z2 - z4
     t2c = np.conjugate(t2)
-    #det = np.real(1 - Rho4 + 2*((z2 * xm).real - Rho2))
-    det = np.real(x**2 - Rho4 + 2*((z2 * xm).real - x * Rho2))
+    # det = np.real(1 - Rho4 + 2*((z2 * xm).real - Rho2))
+    det = np.real(x ** 2 - Rho4 + 2 * ((z2 * xm).real - x * Rho2))
 
     if polar:
         out[:, 0, 0] = (x ** 2 - Rho4) / det
@@ -612,7 +652,7 @@ def invert_hit_sub(matrix, thr=1.e-3, polar=True):
         out[:, 2, 1] = t2c / det
         out[:, 2, 2] = out[:, 1, 1]
         bad = np.where((np.abs(det) < thr) + (np.isnan(det)))
-        out[bad, :, :] = 0.
+        out[bad, :, :] = 0.0
         nbad = np.size(bad)
     else:
         # unpolarized map
@@ -623,13 +663,14 @@ def invert_hit_sub(matrix, thr=1.e-3, polar=True):
 
 
 def invert_hit(matrix, thr=None, polar=None):
+    """Blockwise inversion of hit matrix for numerical stability."""
     n = np.size(matrix, 0)
     nbad = 0
     out = np.zeros((n, 3, 3), dtype=np.complex128)
     step = 1024 * 16
     for first in range(0, n, step):
         last = first + step
-        if (last > n):
+        if last > n:
             last = n
         out[first:last], nbad1 = invert_hit_sub(matrix[first:last], thr=thr,
                                                 polar=polar)
@@ -640,6 +681,7 @@ def invert_hit(matrix, thr=None, polar=None):
 def make_hit_vectors(
         RIMO, nside, hgrp, detset, smax, pixels, spin_ref, thr=None,
         rhohit=None, masks=None):
+    """Build hit vectors and their inverse-weighted versions."""
     t00 = time.time()
     det, w8, psb, rho_IMO = my_create_bololist_w8(detset, RIMO)
     nd = len(w8)
@@ -647,21 +689,21 @@ def make_hit_vectors(
     npq, nhigh_, skip_, sample_ = count_pix(pixels)
     hit = np.zeros(npq, dtype=np.float64)
     hs = np.zeros((npq, 3), dtype=np.complex128)
-    hv = np.zeros((nd, smax+1, npq), dtype=np.complex128)
+    hv = np.zeros((nd, smax + 1, npq), dtype=np.complex128)
     # do polarized hit matrix only if at least 3 PSBs
     polar = np.sum(psb) > 2
     # build hit count and spin vectors
     if rhohit == 'Ideal':
-        rho = np.array(psb) * 1. # 1  for PSB, 0 for SWB
+        rho = np.array(psb) * 1.0  # 1 for PSB, 0 for SWB
     elif rhohit == 'IMO':
         rho = rho_IMO
     else:
-        raise RuntimeError('Invalid rhohit: %s' % (rhohit))
+        raise RuntimeError(f'Invalid rhohit: {rhohit}')
     rho1w8 = rho * w8  # rho * w8
     rho2w8 = rho * rho1w8  # rho**2 * w8
     t0 = time.time()
     print(prefix, rho, rho1w8, rho2w8, polar)
-    print(prefix, '.. prepare:', t0-t00, flush=True)
+    print(prefix, '.. prepare:', t0 - t00, flush=True)
     for i, d in enumerate(det):
         # hit info for sampled pixels
         hv[i] = get_wsmap_det(RIMO, nside, hgrp, d, smax, spin_ref,
@@ -673,9 +715,9 @@ def make_hit_vectors(
             hs[:, 2] += rho2w8[i] * hv[i, 4]
     if not polar:
         badT = np.where(hit == 0)
-    hit = np.maximum(hit, 1.) # put 1 in empty pixels
+    hit = np.maximum(hit, 1.0)  # put 1 in empty pixels
     t1 = time.time()
-    print(prefix, '..     get:', t1-t0, flush=True)
+    print(prefix, '..     get:', t1 - t0, flush=True)
     # inverse hit matrix from non-trivial elements of hit matrix
     for s in [0, 1, 2]:
         hs[:, s] /= hit
@@ -684,66 +726,75 @@ def make_hit_vectors(
         nbad = np.size(badT)
     del hs
     t2 = time.time()
-    print(prefix, '..  invert:', t2-t1, '    nbad:', nbad,
-          nbad*1./ npq, '  thr=', thr, polar, flush=True)
+    print(prefix, '..  invert:', t2 - t1, '    nbad:', nbad,
+          nbad * 1.0 / npq, '  thr=', thr, polar, flush=True)
     # apply masks
     ih = apply_hit_masks(ih, masks, pixels=pixels)
     t2b = time.time()
-    print(prefix, '.. masks:', t2b-t2, flush=True)
+    print(prefix, '.. masks:', t2b - t2, flush=True)
     # hit vectors
-    for i, d, in enumerate(det):
+    for i, d in enumerate(det):
         for s in range(smax + 1):
             hv[i, s] /= hit
     del hit
     t3 = time.time()
     print(prefix, '..  vector:', t3 - t2b, flush=True)
     # apply inverse hit matrix
-    hf = np.zeros((nd, smax+1, 3, npq), dtype=np.complex128)
+    hf = np.zeros((nd, smax + 1, 3, npq), dtype=np.complex128)
     step = 1024 * 4
     for i, d in enumerate(det):
         for s in range(smax + 1):
             for first in range(0, npq, step):
                 last = first + step
-                if (last > npq):
+                if last > npq:
                     last = npq
                 hs0 = hv[i, s, first:last]
                 if s <= smax - 2:
-                    hsp2 = hv[i, s+2, first:last]
+                    hsp2 = hv[i, s + 2, first:last]
                 else:
                     hsp2 = 0  # bug correction 2016-06-16
-                if s <= smax-4:
-                    hsp4 = hv[i, s+4, first:last]
+                if s <= smax - 4:
+                    hsp4 = hv[i, s + 4, first:last]
                 else:
                     hsp4 = 0  # bug correction 2016-06-16
                 if s >= 2:
-                    hsm2 = hv[i, s-2, first:last]
+                    hsm2 = hv[i, s - 2, first:last]
                 else:
-                    hsm2 = np.conjugate(hv[i, np.abs(s-2), first:last])
+                    hsm2 = np.conjugate(hv[i, np.abs(s - 2), first:last])
                 if s >= 4:
-                    hsm4 = hv[i, s-4, first:last]
+                    hsm4 = hv[i, s - 4, first:last]
                 else:
-                    hsm4 = np.conjugate(hv[i, np.abs(s-4), first:last])
+                    hsm4 = np.conjugate(hv[i, np.abs(s - 4), first:last])
                 #  \tilde\omega_s[0]
-                hf[i, s, 0, first:last] = \
-                    ih[first:last, 0, 0] * hs0  + \
-                    rho[i]*(ih[first:last, 0, 1] * hsp2 +
-                            ih[first:last, 0, 2] * hsm2)
+                hf[i, s, 0, first:last] = (
+                    ih[first:last, 0, 0] * hs0
+                    + rho[i] * (
+                        ih[first:last, 0, 1] * hsp2
+                        + ih[first:last, 0, 2] * hsm2
+                    )
+                )
 
                 #  \rho\tilde\omega_s[2]
-                hf[i, s, 1, first:last] = \
-                    ih[first:last, 1, 0] * hsm2 + \
-                    rho[i] * (ih[first:last, 1, 1] * hs0 +
-                              ih[first:last, 1, 2] * hsm4)
+                hf[i, s, 1, first:last] = (
+                    ih[first:last, 1, 0] * hsm2
+                    + rho[i] * (
+                        ih[first:last, 1, 1] * hs0
+                        + ih[first:last, 1, 2] * hsm4
+                    )
+                )
                 #  \rho\tilde\omega_s[-2]
-                hf[i,s,2,first:last] = \
-                    ih[first:last, 2, 0] * hsp2 + \
-                    rho[i] * (ih[first:last, 2, 1] * hsp4 +
-                              ih[first:last, 2, 2] * hs0)
+                hf[i, s, 2, first:last] = (
+                    ih[first:last, 2, 0] * hsp2
+                    + rho[i] * (
+                        ih[first:last, 2, 1] * hsp4
+                        + ih[first:last, 2, 2] * hs0
+                    )
+                )
 
     df = np.zeros((nd, 3, 2, npq), dtype=np.complex128)
     d2 = np.zeros((nd, 3, npq), dtype=np.complex128)
     t4 = time.time()
-    print(prefix, '..Inv*vect:', t4-t3, flush=True)
+    print(prefix, '..Inv*vect:', t4 - t3, flush=True)
     del hv
     #
     return hf, df, d2, nbad
@@ -751,19 +802,21 @@ def make_hit_vectors(
 
 def make_hit_matrix(
         RIMO, nside, hgrp1, detset1, hgrp2, detset2, smax, spin_ref,
-        test=False, thr=None, angle_shift=0., savefile='', force_det=None,
-        release=None, rhohit=None, masks=[None, None], conserve_memory=True):
+        test=False, thr=None, angle_shift=0.0, savefile='',
+        force_det=None, release=None, rhohit=None,
+        masks=[None, None], conserve_memory=True):
+    """Compute the hit matrix and associated variance-like terms."""
     success = False
     if savefile != '':
         sf2 = savefile
         sc = '_A' + proc_angle(angle_shift) + '_'
         s0 = sc.replace(proc_angle(angle_shift), proc_angle(0))
         sf2 = sf2.replace(sc, s0)
-        sf2 = sf2.replace('_cmbfast_','_old_')
-        #sf2 = sf2.replace('_cmbfast_', '_cmbfast_PRELIM_')
+        sf2 = sf2.replace('_cmbfast_', '_old_')
+        # sf2 = sf2.replace('_cmbfast_', '_cmbfast_PRELIM_')
         if force_det is not None:
-            sf2 = sf2.replace('_FD%s'%(force_det), '')
-        print(prefix, 'Try reading hit matrix from %s ...'%(sf2), flush=True)
+            sf2 = sf2.replace('_FD%s' % (force_det), '')
+        print(prefix, 'Try reading hit matrix from %s ...' % (sf2), flush=True)
         try:
             oldjunk = np.load(sf2)
             hitmat = oldjunk['hit_mat']
@@ -774,7 +827,7 @@ def make_hit_matrix(
             nbad_2 = oldjunk['nbad2']
             print(prefix, "     ... Success!", flush=True)
             success = True
-        except:
+        except Exception:
             print(prefix, "     ... Failure!", flush=True)
             success = False
     if not success:
@@ -802,7 +855,7 @@ def make_hit_matrix(
         v2mean = np.zeros((3, 4), dtype=np.complex128)
         print(prefix, 'hit matrix: ', np.min(hitmat.real), np.max(hitmat.real),
               flush=True)
-        #qmax = 2 if (test) else nq
+        # qmax = 2 if (test) else nq
         qmax = nq
         if test:
             skip = 64
@@ -814,23 +867,23 @@ def make_hit_matrix(
         for iq in range(qmax):
             t0 = time.time()
             npt += npq
-            pixels = [iq*npq, (iq+1)*npq-1, skip]
-            print(prefix, BLUE_COLOR, pixels, npt, str(100*npt/npix) + ' %',
-                  NO_COLOR)
+            pixels = [iq * npq, (iq + 1) * npq - 1, skip]
+            print(prefix, BLUE_COLOR, pixels, npt,
+                  str(100 * npt / npix) + ' %', NO_COLOR)
             print(prefix, detset1, hgrp1, flush=True)
             hv1, hd1, h21, nbad1 = make_hit_vectors(
                 RIMO, nside, hgrp1, detset1, smax, pixels, spin_ref,
                 thr=thr, rhohit=rhohit, masks=masks[0])
             nbad_1 += nbad1
-            #if (detset2 != detset1): # corrected 2016-01-18
+            # if (detset2 != detset1): # corrected 2016-01-18
             if (detset2 != detset1 or hgrp1 != hgrp2):
                 print(prefix, detset2, hgrp2, flush=True)
                 hv2, hd2, h22, nbad2 = make_hit_vectors(
                     RIMO, nside, hgrp2, detset2, smax, pixels, spin_ref,
                     thr=thr, rhohit=rhohit, masks=masks[1])
             else:
-                print(prefix, RED_COLOR, 'skip calculations for ', detset2, hgrp2,
-                      NO_COLOR, flush=True)
+                print(prefix, RED_COLOR, 'skip calculations for ', detset2,
+                      hgrp2, NO_COLOR, flush=True)
                 hv2 = hv1
                 hd2 = hd1
                 h22 = h21
@@ -847,13 +900,14 @@ def make_hit_matrix(
                 last = min(first + step, npq)
                 for i1 in range(nd1):
                     for i2 in range(nd2):
-                        for s in range(smax+1):
+                        for s in range(smax + 1):
                             for u1 in range(3):
                                 for u2 in range(3):
                                     # = sum_p h1 . conj(h2)
                                     hitmat[i1, i2, s, u1, u2] += np.vdot(
                                         hv2[i2, s, u2, first:last],
-                                        hv1[i1, s, u1, first:last])
+                                        hv1[i1, s, u1, first:last]
+                                    )
 
                         # apply weights w1 and w2 to subpixel
                         # contributions to mimic proper scalar
@@ -865,11 +919,13 @@ def make_hit_matrix(
                                         for k2_2 in range(2):
                                             varmat[k1_1, k1_2, k2_1, k2_2] += \
                                                 np.vdot(
-                                                    hd2[i2, k1_2, k2_2, first:last],
-                                                    hd1[i1, k1_1, k2_1, first:last]
-                                                ) * (w2[i2]*w1[i1])
+                                                    hd2[i2, k1_2, k2_2,
+                                                        first:last],
+                                                    hd1[i1, k1_1, k2_1,
+                                                        first:last]
+                                                ) * (w2[i2] * w1[i1])
                         if do_v2mat:
-                            for k,v in enumerate([0, 2, -2]):
+                            for k, v in enumerate([0, 2, -2]):
                                 v2mat[k] += (
                                     np.vdot(h22[i2, k, first:last],
                                             hv1[i1, 0, v, first:last]) +
@@ -878,33 +934,43 @@ def make_hit_matrix(
                                 ) * (w2[i2] * w1[i1])
                 for k, v in enumerate([0, 2, -2]):
                     for i1 in range(nd1):
-                        v2mean[k, 0] += np.sum(hv1[i1, 0, v, first:last]) * w1[i1]
-                        v2mean[k, 1] += np.sum(h21[i1, k, first:last]) * w1[i1]
+                        v2mean[k, 0] += np.sum(
+                            hv1[i1, 0, v, first:last]
+                        ) * w1[i1]
+                        v2mean[k, 1] += np.sum(
+                            h21[i1, k, first:last]
+                        ) * w1[i1]
                     for i2 in range(nd2):
-                        v2mean[k, 2] += np.sum(hv2[i2, 0, v,first:last]) * w2[i2]
-                        v2mean[k, 3] += np.sum(h22[i2, k, first:last]) * w2[i2]
+                        v2mean[k, 2] += np.sum(
+                            hv2[i2, 0, v, first:last]
+                        ) * w2[i2]
+                        v2mean[k, 3] += np.sum(
+                            h22[i2, k, first:last]
+                        ) * w2[i2]
             t2 = time.time()
             print(prefix, '. compression: {:.2f} s, npq = {}, step = {}'
-                  ''.format(t2-t1, npq, step), flush=True)
-        #------
-        hitmat /= (npt / skip) # divide hit matrix by number of (sampled) pixels
-        varmat /= (npt / skip) # divide var matrix by number of (sampled) pixels,
+                  ''.format(t2 - t1, npq, step), flush=True)
+        # ------
+        hitmat /= (npt / skip)  # divide hit matrix by number of (sampled) pixels
+        varmat /= (npt / skip)  # divide var matrix by number of (sampled) pixels
         v2mean /= (npt / skip)
-        v2mat /= (npt / skip) # divide var matrix by number of (sampled) pixels,
+        v2mat /= (npt / skip)  # divide var matrix by number of (sampled) pixels
         for k in range(3):
-            v2mat[k] -= np.conjugate(v2mean[k, 3]) * v2mean[k, 0] + \
-                        np.conjugate(v2mean[k, 2]) * v2mean[k, 1]
+            v2mat[k] -= (np.conjugate(v2mean[k, 3]) * v2mean[k, 0]
+                         + np.conjugate(v2mean[k, 2]) * v2mean[k, 1])
         varmat *= (4 * np.pi / npix)  # multiply var matrix by pixel area
         v2mat *= (4 * np.pi / npix)  # multiply var matrix by pixel area
 
     return hitmat, varmat, v2mat, nbad_1, nbad_2, skip
 
+
 # ------------------------------------------------------------------------------
+
 
 def product_pre2(
         bdict1, bdict2, hit_matrix, lmax, smax, intypes, lstep=1, planet='',
         pconv='', rhobeam=None, w_cutsky=None, masks_means=None):
-
+    """Compute effective beam matrices for a given set of input C_ell types."""
     # constant matrices
     diag = np.array([
         [1, 0, 0],
@@ -925,6 +991,8 @@ def product_pre2(
             [1, 0, 0],
             [0, 1, 1j],
             [0, 1, -1j]])
+    else:
+        raise RuntimeError(f'Unknown pconv: {pconv}')
     arot = adjoint(rot)
     irot = LA.inv(rot)
     airot = adjoint(irot)
@@ -941,16 +1009,16 @@ def product_pre2(
     nc = len(intypes)
     cpp = np.zeros((nc, 3, 3), dtype=np.complex128)
     for ic, intype in enumerate(intypes):
-        mcl = (mcl_in == intype)*1.
+        mcl = (mcl_in == intype) * 1.0
         cpp[ic] = dots(rot, mcl, arot)
 
-    cout = np.zeros((nc, lmax+1, 3, 3),dtype=np.complex128)
-    lb = np.arange(0, lmax+1, lstep)
+    cout = np.zeros((nc, lmax + 1, 3, 3), dtype=np.complex128)
+    lb = np.arange(0, lmax + 1, lstep)
     lb[-1] = lmax  # Cannot extrapolate
     nd1 = np.size(bdict1)
     nd2 = np.size(bdict2)
-    time_bmat = 0.
-    time_other = 0.
+    time_bmat = 0.0
+    time_other = 0.0
     my_count = 0
     time_00 = time.time()
     # precompute
@@ -975,7 +1043,7 @@ def product_pre2(
         for i1 in range(nd1):
             for i2 in range(nd2):
                 hmat = hit_matrix[i1, i2, np.abs(s)]
-                if (s < 0):
+                if s < 0:
                     hmat = dots(swap12, hmat.conjugate(), swap12)
 
                 for l in lb:
@@ -988,7 +1056,7 @@ def product_pre2(
                     time_bmat += time_02 - time_01
 
                     # product  B.C.B
-                    m1 = dots(idiag, abm1,  diag)
+                    m1 = dots(idiag, abm1, diag)
                     m2 = dots(diag, bm2, idiag)
                     for ic in range(nc):
                         m = dots(m1, cpp[ic], m2)
@@ -1018,8 +1086,8 @@ def product_pre2(
     if lstep > 1:
         for ic in range(nc):
             cout[ic] = interpolate_matrix(cout[ic], lmax, lb)
-        #cout[ic] = deconv_planet(cout[ic], planet=planet,
-        #    w_cutsky=w_cutsky, masks_means=masks_means)
+        # cout[ic] = deconv_planet(cout[ic], planet=planet,
+        #     w_cutsky=w_cutsky, masks_means=masks_means)
 
     return cout
 
@@ -1028,6 +1096,7 @@ def product_pre2(
 
 
 def detset2nside(detset):
+    """Map a detset string to an appropriate nside."""
     if detset.startswith('0') or detset.startswith('LFI'):
         nside = 1024
     else:
@@ -1040,18 +1109,16 @@ def program1(
         angle_shift=0, force_det=None, release=None, rhobeam=None,
         rhohit=None, test=False, planet='Saturn', conserve_memory=True,
         overwrite=False):
-
+    """Top-level QuickPol driver for one or more detector-set pairs."""
     lstep = 10
     mmax = 10
-    #thr = 1.e-3  # initial value
-    #thr = 1.e-2 # test
-    thr = 3.e-3
+    # thr = 1.e-3  # initial value
+    # thr = 1.e-2  # test
+    thr = 3.0e-3
     pconv = 'cmbfast'
 
-    #    angle_shift = 90 # 0, +90, -90, 180
-
     if isinstance(mytype, str):
-        raise RuntimeError('mytype cannot be a string: "{}"'.format(mytype))
+        raise RuntimeError(f'mytype cannot be a string: "{mytype}"')
     else:
         ldets = mytype
         if isinstance(ldets[0], str):
@@ -1098,7 +1165,7 @@ def program1(
             bdict2 = copy.deepcopy(bdict1)
 
         t1 = time.time()
-        print(prefix, 'prelim:      {:.2f} s'.format(t1-t0), flush=True)
+        print(prefix, 'prelim:      {:.2f} s'.format(t1 - t0), flush=True)
 
         # get hit_matrix
         hit_matrix, var_matrix, v2_matrix, nbad1, nbad2, skip = make_hit_matrix(
@@ -1108,8 +1175,8 @@ def program1(
             conserve_memory=conserve_memory)
 
         t2 = time.time()
-        print(prefix, 'hit matrix: ', t2-t1, ', bad pixels: ',nbad1, nbad2, skip,
-              flush=True)
+        print(prefix, 'hit matrix: ', t2 - t1, ', bad pixels: ', nbad1, nbad2,
+              skip, flush=True)
 
         print(prefix, 'sub pixel 1 Var matrix')
         # D_00++ + D_00--
@@ -1120,19 +1187,19 @@ def program1(
         print(prefix, var_matrix[2, 2, 0, 0] + var_matrix[2, 2, 1, 1])
 
         print(prefix, 'sub pixel 2 Var matrix')
-        print(prefix, v2_matrix[0]) #,0],v2_matrix[0,1],v2_matrix[0,2]
-        print(prefix, v2_matrix[1]) #,0],v2_matrix[1,1],v2_matrix[1,2]
-        print(prefix, v2_matrix[2]) #,0],v2_matrix[2,1],v2_matrix[2,2]
+        print(prefix, v2_matrix[0])
+        print(prefix, v2_matrix[1])
+        print(prefix, v2_matrix[2])
 
         lshow = 1000
         print(prefix, lmax, smax, lstep, lshow, flush=True)
 
         beam_mat = dict()
-        #ctypes_in = ['TT']
-        ctypes_in = ['TT', 'TE', 'EE', 'BB', 'TB', 'EB' ]
+        # ctypes_in = ['TT']
+        ctypes_in = ['TT', 'TE', 'EE', 'BB', 'TB', 'EB']
         wxx = product_pre2(
             bdict1, bdict2, hit_matrix, lmax, smax, ctypes_in,
-            lstep=lstep, planet=planet,pconv=pconv, rhobeam=rhobeam,
+            lstep=lstep, planet=planet, pconv=pconv, rhobeam=rhobeam,
             w_cutsky=w_cutsky, masks_means=masks_means)
         for ic, ctype_in in enumerate(ctypes_in):
             beam_mat[ctype_in] = wxx[ic].real
@@ -1154,28 +1221,28 @@ def program1(
         print(prefix, 'Results saved in {}'.format(savefile))
 
         tend = time.time()
-        print(prefix, 'computations: {:.2f}'.format(tend-t2))
-        print(prefix, 'TOTAL: {:.2f} s'.format(tend-t0), flush=True)
+        print(prefix, 'computations: {:.2f}'.format(tend - t2))
+        print(prefix, 'TOTAL: {:.2f} s'.format(tend - t0), flush=True)
 
 
-#==============================================================================
-#==============================================================================
-#==============================================================================
+# ==============================================================================
+# ==============================================================================
+# ==============================================================================
 
 
 if __name__ == '__main__':
-    routine = 'qprun.py'
+    routine = 'qp.py'
 
     usage = 'usage: ' + routine + '  [arguments] '
 
-    #opts, args = getopt.getopt(sys.argv[1:], '')
-    #if len(args) == 0:
-    #    args = ['']
-    #if len(args) >= 2:
-    #    period = np.int(args[1])
-    #else:
-    #    period = 6
-    #print(args[0], period)
+    # opts, args = getopt.getopt(sys.argv[1:], '')
+    # if len(args) == 0:
+    #     args = ['']
+    # if len(args) >= 2:
+    #     period = np.int(args[1])
+    # else:
+    #     period = 6
+    # print(args[0], period)
 
     # Load and merge LFI and HFI RIMOs
     print(prefix, 'Loading RIMO from', fn_rimo_lfi, flush=True)
@@ -1184,8 +1251,8 @@ if __name__ == '__main__':
     HFIRIMO = load_RIMO(fn_rimo_hfi)
     RIMO = {**LFIRIMO, **HFIRIMO}
 
-#    freqs = [30, 44, 70, 100, 143, 217, 353, 545, 857]
-    freqs = [100, 143, 217]
+    # freqs = [30, 44, 70, 100, 143, 217, 353, 545, 857]
+    freqs = [100, 143, 217, 353]
 
     detsets = []
     for suffix in ['GHz', 'A', 'B']:
@@ -1196,13 +1263,11 @@ if __name__ == '__main__':
     detsetpairs = []
 
     # Full frequency and detector set auto and cross spectra
-
     for idetset1, detset1 in enumerate(detsets):
         for idetset2, detset2 in enumerate(detsets):
-            #if idetset2 < idetset1:
-            #    continue
-            # No cross spectra between full frequency and
-            # detsets
+            # if idetset2 < idetset1:
+            #     continue
+            # No cross spectra between full frequency and detsets
             if detset1.endswith('GHz') and detset2[-1] in 'AB':
                 continue
             if detset2.endswith('GHz') and detset1[-1] in 'AB':
@@ -1210,7 +1275,6 @@ if __name__ == '__main__':
             detsetpairs.append((detset1, detset2))
 
     # Single detector and single horn auto spectra
-
     for det in list_planck('Planck'):
         # Single detector
         detsetpairs.append((det, det))
