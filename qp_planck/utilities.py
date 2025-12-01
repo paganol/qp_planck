@@ -117,6 +117,7 @@ class DetectorData:
 # Quaternion utilities
 # ----------------------------------------------------------------------
 
+
 def quat_mult(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
     """
     Multiply two quaternions with scalar part in the last component.
@@ -167,6 +168,7 @@ SPINROT: np.ndarray = np.array([0.0, 0.0, 0.0, 1.0])
 # ----------------------------------------------------------------------
 # RIMO loading
 # ----------------------------------------------------------------------
+
 
 def load_RIMO(path: str, comm: Optional[Any] = None) -> Dict[str, DetectorData]:
     """
@@ -262,6 +264,7 @@ def load_RIMO(path: str, comm: Optional[Any] = None) -> Dict[str, DetectorData]:
 # ----------------------------------------------------------------------
 # Planck detector lists
 # ----------------------------------------------------------------------
+
 
 def list_planck(
     detset: Union[int, str],
@@ -598,6 +601,7 @@ detector_weights: Dict[str, float] = {
 # ----------------------------------------------------------------------
 # QuickPol filename helper
 # ----------------------------------------------------------------------
+
 
 def qp_file(
     outdir: str,
