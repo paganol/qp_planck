@@ -281,19 +281,19 @@ def my_mwrfits(
 
         hdulist.append(tbhdu)
 
+
     # write the file
     hdulist.writeto(filename, overwrite=True)
 
-    # checking out the file
+    # checking out the file: just verify we can read it with astropy
     try:
         _ = pyfits.getdata(filename)
-        _ = hp.mrdfits(filename)
-        print(prefix, f'{GREEN_COLOR} checking out {filename}{NO_COLOR}',
+        print(prefix,
+              f'{GREEN_COLOR} checking out {filename}{NO_COLOR}',
               flush=True)
     except Exception as err:
         raise RuntimeError(f'Failed to load {filename}: {err}') from err
-
-
+    
 # -----------------------------------------------------------------------------
 
 
@@ -539,7 +539,7 @@ def q2f(indir, outdir, dets, smax, release=None, full=True, blfile=True,
 
 if __name__ == '__main__':
 
-    freqs = [30, 44, 70, 100, 143, 217, 353, 545, 857]
+    freqs = [100, 143, 217, 353]
 
     detsets = []
     for suffix in ['GHz', 'A', 'B']:

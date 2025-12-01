@@ -1252,7 +1252,7 @@ if __name__ == '__main__':
     RIMO = {**LFIRIMO, **HFIRIMO}
 
     # freqs = [30, 44, 70, 100, 143, 217, 353, 545, 857]
-    freqs = [100, 143, 217]
+    freqs = [100, 143, 217, 353]
 
     detsets = []
     for suffix in ['GHz', 'A', 'B']:
