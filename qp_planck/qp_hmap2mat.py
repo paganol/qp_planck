@@ -80,10 +80,10 @@ qprun_npipe.py and qp2fits_npipe.py are adapted from QuickPol. See
 
  main routines
      product_pre2
-     program1
+     hmap2mat
 
   main:
-    +--program1
+    +--hmap2mat
          +--get_all_masks
          +--qp_file
          +--parse_detname
@@ -1104,12 +1104,13 @@ def detset2nside(detset):
     return nside
 
 
-def program1(
+def hmap2mat(
         RIMO, mytype, blmfile, outdir, smax, spin_ref, blm_ref,
         angle_shift=0, force_det=None, release=None, rhobeam=None,
         rhohit=None, test=False, planet='Saturn', conserve_memory=True,
         overwrite=False):
     """Top-level QuickPol driver for one or more detector-set pairs."""
+    
     lstep = 10
     mmax = 10
     # thr = 1.e-3  # initial value
@@ -1231,7 +1232,7 @@ def program1(
 
 
 if __name__ == '__main__':
-    routine = 'qp.py'
+    routine = 'qp_hmap2mat.py'
 
     usage = 'usage: ' + routine + '  [arguments] '
 
@@ -1252,7 +1253,7 @@ if __name__ == '__main__':
     RIMO = {**LFIRIMO, **HFIRIMO}
 
     # freqs = [30, 44, 70, 100, 143, 217, 353, 545, 857]
-    freqs = [100, 143, 217, 353]
+    freqs = [100, 143, 217]
 
     detsets = []
     for suffix in ['GHz', 'A', 'B']:
@@ -1286,7 +1287,7 @@ if __name__ == '__main__':
     for ipair, detsetpair in enumerate(detsetpairs):
         if ipair % ntask != rank:
             continue
-        program1(RIMO, detsetpair, blmfile, outdir, smax, spin_ref, blm_ref,
+        hmap2mat(RIMO, detsetpair, blmfile, outdir, smax, spin_ref, blm_ref,
                  release=release, rhobeam=rhobeam, rhohit=rhobeam,
                  test=test, planet=planet, conserve_memory=conserve_memory,
                  overwrite=False)

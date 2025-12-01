@@ -27,7 +27,7 @@ prefix = f"{rank:04d} :"
 
 """
     main
-      +--q2f
+      +--mat2fits
            +--clobber
            +--my_mwrfits
 """
@@ -338,8 +338,8 @@ def detset2pol(detset):
     return pol
 
 
-def q2f(indir, outdir, dets, smax, release=None, full=True, blfile=True,
-        blTEBfile=True, wlfile=True, overwrite=True, do_plot=False):
+def mat2fits(indir, outdir, dets, smax, release=None, full=True, blfile=True,
+             blTEBfile=True, wlfile=True, overwrite=True, do_plot=False):
     """
     Convert QuickPol NPZ output into FITS B_ell and W_ell window function files.
 
@@ -573,7 +573,6 @@ if __name__ == '__main__':
     for ipair, detsetpair in enumerate(detsetpairs):
         if ipair % ntask != rank:
             continue
-        q2f(outdir, indir, detsetpair, smax, release=release, full=full,
-            blfile=blfile, blTEBfile=blTEBfile, wlfile=wlfile,
-            overwrite=overwrite, do_plot=do_plot)
-
+        mat2fits(outdir, indir, detsetpair, smax, release=release, full=full,
+                 blfile=blfile, blTEBfile=blTEBfile, wlfile=wlfile,
+                 overwrite=overwrite, do_plot=do_plot)
