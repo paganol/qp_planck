@@ -93,13 +93,13 @@ qprun_npipe.py and qp2fits_npipe.py are adapted from QuickPol. See
          +--print_matrix
 """
 
-auxdir = '/project/projectdirs/planck/data/npipe/aux'
-fn_rimo_lfi = os.path.join(auxdir, 'RIMO_LFI_npipe5_symmetrized.fits')
-fn_rimo_hfi = os.path.join(auxdir, 'RIMO_HFI_npipe5v16_symmetrized.fits')
+auxdir = '/g100_work/INF25_litebird_1/lpagano0/beam_windows_planck/inputs/'
+fn_rimo_lfi = os.path.join(auxdir, 'RIMOs/RIMO_LFI_npipe5_symmetrized.fits')
+fn_rimo_hfi = os.path.join(auxdir, 'RIMOs/RIMO_HFI_npipe5v16_symmetrized.fits')
 
 hitgrpfull = os.path.join(auxdir, 'polmoments')
 blmdir = os.path.join(auxdir, 'beams')
-outdir = './quickpol_output'
+outdir = '../quickpol_output'
 #blmfile_lfi = blmdir + 'mb_lfi_{}_dx12_smear.alm'
 #blmfile_hfi = blmdir + 'BS_HBM_DX11v67_I5_HIGHRES_POLAR_{}_xp_alm.fits'
 blmfile = blmdir + '/blm_{}.fits'
@@ -137,7 +137,7 @@ def print_matrix(matrix, l=None, ctype=''):
     if l is not None:
         print(prefix, ('l=%s'%(str(l))))
     for i in range(3):
-        if isinstance(matrix[0,0], np.complex):
+        if isinstance(matrix[0,0], np.complex128):
             v = ['%+.2e %+.2ei' % (n.real, n.imag) for n in (matrix[i])]
         else:
             v = ['%+.2e' % (n) for n in (matrix[i])]
@@ -180,9 +180,9 @@ def my_create_bololist_w8(detset, RIMO):
     """
     dets = list_planck(detset)
     ndet = len(dets)
-    w8 = np.zeros(ndet, dtype=np.float)
+    w8 = np.zeros(ndet, dtype=np.float64)
     psb = np.zeros(ndet, dtype=np.bool)
-    rho = np.zeros(ndet, dtype=np.float)
+    rho = np.zeros(ndet, dtype=np.float64)
     for idet, det in enumerate(dets):
         if det[-1] in 'abMS':
             horn = det[:-1]
@@ -249,7 +249,7 @@ def get_blm_det(blmfile, det, lmax=None, mmax=None):
         print(prefix, RED_COLOR, 'WARNING: Polarized Blm not found in %s'
               '' % (fitsfile), NO_COLOR, flush=True)
 
-    ls = np.array(np.floor(np.sqrt(Tix - 1)), dtype=np.int)
+    ls = np.array(np.floor(np.sqrt(Tix - 1)), dtype=np.int64)
     ms = Tix - ls*ls - ls - 1
 
     if lmax is None:
@@ -259,7 +259,7 @@ def get_blm_det(blmfile, det, lmax=None, mmax=None):
 
     idxs = (ls <= lmax) * (ms <= mmax)
 
-    ret = np.zeros((lmax + 1, mmax + 1, ndb), dtype=np.complex)
+    ret = np.zeros((lmax + 1, mmax + 1, ndb), dtype=np.complex128)
     ret[ls[idxs], ms[idxs], 0] = Tre[idxs] + 1j * Tim[idxs]
     if polbeam_in:
         ret[ls[idxs], ms[idxs], 1] = -((Gre[idxs] - Cim[idxs]) +
@@ -292,7 +292,7 @@ def get_gblm_det(RIMO, det, lmax=4000, mmax=0):
     fwhm_rad = np.radians(fwhm_am / 60)
 
     print(prefix, 'Gaussian circular beam: ', det, fwhm_am, fwhm_rad, flush=True)
-    ret = np.zeros((lmax + 1, mmax + 1), dtype=np.complex)
+    ret = np.zeros((lmax + 1, mmax + 1), dtype=np.complex128)
     l = np.arange(0, lmax + 1)
     ret[:, 0] = hp.gauss_beam(fwhm_rad, lmax)
 
@@ -339,10 +339,10 @@ def bmat(bdict, l, s, rhobeam=None, verbose=False):
     ndb = bdict['ndb']
     sgn = np.array([1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1])[0:mmax + 1]
     n = mmax
-    b = np.zeros((2 * n + 1, ndb), dtype=np.complex)
+    b = np.zeros((2 * n + 1, ndb), dtype=np.complex128)
     # According to qrun_Nersc.py, mphi is identical for temperature
     # and polarization so we collapse the extra dimension
-    mphi = np.arange(n + 1, dtype=float)  # m
+    mphi = np.arange(n + 1, dtype=np.float64)  # m
     mphi *= (bdict['angle'] + bdict['angle_shift'])  # m * (phi + phi0)
     phase = np.cos(mphi) + 1j * np.sin(mphi)  # e^{i m phi}
     blm = bdict['blm'][l, 0:n + 1, 0] * phase  # b_lm e^{i m mphi}
@@ -423,7 +423,7 @@ def interpolate_matrix(matrix, lmax, lb):
     n1 = np.size(matrix, 1)
     n2 = np.size(matrix, 2)
     kind = 'cubic' # for interp1d
-    do_cplx = isinstance(matrix[0, 0, 0], np.complex)
+    do_cplx = isinstance(matrix[0, 0, 0], np.complex128)
     matout = np.zeros((lmax+1, n1, n2), dtype=type(matrix[0, 0, 0]))
     l = np.arange(lmax+1)
     for i in range(n1):
@@ -543,14 +543,14 @@ def get_wsmap_det(RIMO, nside, grp, det, smax, spin_ref, pixels=None,
     print(prefix, 'nlow =', nlow, ', nhigh =', nhigh, ', skip =', skip,
           ', sample =', sample, flush=True)
 
-    wsmp = np.zeros((smax+1, nlow), dtype=np.complex)
+    wsmp = np.zeros((smax+1, nlow), dtype=np.complex128)
 
     t1 = time.time()
     # Use healpy read_map so map is always in RING ordering
     #hit = pyfits.getdata(fitsfile1).field(0).flatten()
     #spins = pyfits.getdata(fitsfile2)
-    hit = hp.read_map(fitsfile1, verbose=False)
-    spins = hp.read_map(fitsfile2, None, verbose=False)
+    hit = hp.read_map(fitsfile1)
+    spins = hp.read_map(fitsfile2, None)
     nside_hit = hp.get_nside(hit)
     if nside != nside_hit:
         hit = hp.ud_grade(hit, nside, power=-2)
@@ -579,7 +579,7 @@ def get_wsmap_det(RIMO, nside, grp, det, smax, spin_ref, pixels=None,
 def invert_hit_sub(matrix, thr=1.e-3, polar=True):
     n = np.size(matrix, 0)
     nt = np.size(matrix)
-    out = np.zeros((n, 3, 3), dtype=np.complex)
+    out = np.zeros((n, 3, 3), dtype=np.complex128)
     if nt == 9 * n:
         # input: nx3x3 array
         z2 = matrix[:, 0, 2]
@@ -625,7 +625,7 @@ def invert_hit_sub(matrix, thr=1.e-3, polar=True):
 def invert_hit(matrix, thr=None, polar=None):
     n = np.size(matrix, 0)
     nbad = 0
-    out = np.zeros((n, 3, 3), dtype=np.complex)
+    out = np.zeros((n, 3, 3), dtype=np.complex128)
     step = 1024 * 16
     for first in range(0, n, step):
         last = first + step
@@ -645,9 +645,9 @@ def make_hit_vectors(
     nd = len(w8)
     # number of sampled pixels
     npq, nhigh_, skip_, sample_ = count_pix(pixels)
-    hit = np.zeros(npq, dtype=np.float)
-    hs = np.zeros((npq, 3), dtype=np.complex)
-    hv = np.zeros((nd, smax+1, npq), dtype=np.complex)
+    hit = np.zeros(npq, dtype=np.float64)
+    hs = np.zeros((npq, 3), dtype=np.complex128)
+    hv = np.zeros((nd, smax+1, npq), dtype=np.complex128)
     # do polarized hit matrix only if at least 3 PSBs
     polar = np.sum(psb) > 2
     # build hit count and spin vectors
@@ -698,7 +698,7 @@ def make_hit_vectors(
     t3 = time.time()
     print(prefix, '..  vector:', t3 - t2b, flush=True)
     # apply inverse hit matrix
-    hf = np.zeros((nd, smax+1, 3, npq), dtype=np.complex)
+    hf = np.zeros((nd, smax+1, 3, npq), dtype=np.complex128)
     step = 1024 * 4
     for i, d in enumerate(det):
         for s in range(smax + 1):
@@ -740,8 +740,8 @@ def make_hit_vectors(
                     rho[i] * (ih[first:last, 2, 1] * hsp4 +
                               ih[first:last, 2, 2] * hs0)
 
-    df = np.zeros((nd, 3, 2, npq), dtype=np.complex)
-    d2 = np.zeros((nd, 3, npq), dtype=np.complex)
+    df = np.zeros((nd, 3, 2, npq), dtype=np.complex128)
+    d2 = np.zeros((nd, 3, npq), dtype=np.complex128)
     t4 = time.time()
     print(prefix, '..Inv*vect:', t4-t3, flush=True)
     del hv
@@ -796,10 +796,10 @@ def make_hit_matrix(
             nq = 1
 
         npt = 0
-        hitmat = np.zeros((nd1, nd2, smax + 1, 3, 3), dtype=np.complex)
-        varmat = np.zeros((3, 3, 2, 2), dtype=np.complex)
-        v2mat = np.zeros((3), dtype=np.complex)
-        v2mean = np.zeros((3, 4), dtype=np.complex)
+        hitmat = np.zeros((nd1, nd2, smax + 1, 3, 3), dtype=np.complex128)
+        varmat = np.zeros((3, 3, 2, 2), dtype=np.complex128)
+        v2mat = np.zeros((3), dtype=np.complex128)
+        v2mean = np.zeros((3, 4), dtype=np.complex128)
         print(prefix, 'hit matrix: ', np.min(hitmat.real), np.max(hitmat.real),
               flush=True)
         #qmax = 2 if (test) else nq
@@ -939,12 +939,12 @@ def product_pre2(
         ['TE', 'EE', 'EB'],
         ['TB', 'EB', 'BB']])
     nc = len(intypes)
-    cpp = np.zeros((nc, 3, 3), dtype=np.complex)
+    cpp = np.zeros((nc, 3, 3), dtype=np.complex128)
     for ic, intype in enumerate(intypes):
         mcl = (mcl_in == intype)*1.
         cpp[ic] = dots(rot, mcl, arot)
 
-    cout = np.zeros((nc, lmax+1, 3, 3),dtype=np.complex)
+    cout = np.zeros((nc, lmax+1, 3, 3),dtype=np.complex128)
     lb = np.arange(0, lmax+1, lstep)
     lb[-1] = lmax  # Cannot extrapolate
     nd1 = np.size(bdict1)
@@ -955,8 +955,8 @@ def product_pre2(
     time_00 = time.time()
     # precompute
     nl = np.size(lb)
-    bm1_full = np.zeros((2 * smax + 1, nd1, nl, 3, 3), dtype=np.complex)
-    bm2_full = np.zeros((2 * smax + 1, nd2, nl, 3, 3), dtype=np.complex)
+    bm1_full = np.zeros((2 * smax + 1, nd1, nl, 3, 3), dtype=np.complex128)
+    bm2_full = np.zeros((2 * smax + 1, nd2, nl, 3, 3), dtype=np.complex128)
     for i1 in range(nd1):
         for s in np.arange(-smax, smax + 1):
             for l in lb:
@@ -1184,7 +1184,8 @@ if __name__ == '__main__':
     HFIRIMO = load_RIMO(fn_rimo_hfi)
     RIMO = {**LFIRIMO, **HFIRIMO}
 
-    freqs = [30, 44, 70, 100, 143, 217, 353, 545, 857]
+#    freqs = [30, 44, 70, 100, 143, 217, 353, 545, 857]
+    freqs = [100, 143, 217]
 
     detsets = []
     for suffix in ['GHz', 'A', 'B']:
