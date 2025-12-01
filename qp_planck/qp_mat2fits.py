@@ -15,6 +15,7 @@ function files (B_ell and W_ell).
 # Optional MPI via mpi4py; fall back to serial execution if not available.
 try:
     from mpi4py import MPI
+
     comm = MPI.COMM_WORLD
     ntask = comm.size
     rank = comm.rank
@@ -27,7 +28,7 @@ prefix = f"{rank:04d} :"
 
 """
     main
-      +--q2f
+      +--mat2fits
            +--clobber
            +--my_mwrfits
 """
@@ -44,32 +45,26 @@ import healpy as hp
 
 from utilities import list_planck, qp_file
 
-outdir = '../quickpol_output'
-indir = '../quickpol_output'
+outdir = "../quickpol_output"
+indir = "../quickpol_output"
 smax = 6
 docross = True
 blfile = True
 wlfile = True
 blTEBfile = True
 overwrite = False
-release = 'npipe6v20'
+release = "npipe6v20"
 full = False  # False : Only sample a small fraction of the pixels
 do_plot = False
 
-NO_COLOR = '\x1b[0m'
-GREEN_COLOR = '\x1b[32;11m'
-RED_COLOR = '\x1b[31;01m'
-BLUE_COLOR = '\x1b[34;11m'
-BOLD = '\x1b[1;01m'
+NO_COLOR = "\x1b[0m"
+GREEN_COLOR = "\x1b[32;11m"
+RED_COLOR = "\x1b[31;01m"
+BLUE_COLOR = "\x1b[34;11m"
+BOLD = "\x1b[1;01m"
 
-t1 = np.array([  # sym
-    ['TT', 'TE', 'TB'],
-    ['TE', 'EE', 'EB'],
-    ['TB', 'EB', 'BB']])
-t2 = np.array([  # non-sym
-    ['TT', 'TE', 'TB'],
-    ['ET', 'EE', 'EB'],
-    ['BT', 'BE', 'BB']])
+t1 = np.array([["TT", "TE", "TB"], ["TE", "EE", "EB"], ["TB", "EB", "BB"]])  # sym
+t2 = np.array([["TT", "TE", "TB"], ["ET", "EE", "EB"], ["BT", "BE", "BB"]])  # non-sym
 kk = [[0, 0], [1, 1], [2, 2], [0, 1], [0, 2], [1, 2], [1, 0], [2, 0], [2, 1]]
 t3 = [t2[k1, k2] for k1, k2 in kk]
 
@@ -96,7 +91,7 @@ def fit_gauss(bl):
     ell = np.arange(bl.size)
 
     def gaussbeam(ell, sigma):
-        return np.exp(-0.5 * ell * (ell + 1) * sigma ** 2)
+        return np.exp(-0.5 * ell * (ell + 1) * sigma**2)
 
     def resid(p, ell, bl):
         sigma = p[0]
@@ -104,10 +99,10 @@ def fit_gauss(bl):
 
     p0 = [np.radians(0.5)]
     result = scipy.optimize.least_squares(
-        resid, p0, method='lm', args=(ell, bl), max_nfev=10000
+        resid, p0, method="lm", args=(ell, bl), max_nfev=10000
     )
     if not result.success:
-        raise RuntimeError(f'Gaussian fitting failed: {result.message}')
+        raise RuntimeError(f"Gaussian fitting failed: {result.message}")
     sigma = result.x[0]
     return gaussbeam(ell, sigma), sigma
 
@@ -134,12 +129,13 @@ def clobber(filename, overwrite):
     write = True
     if os.path.exists(filename):
         if overwrite:
-            print(prefix, f'{RED_COLOR}Overwriting {filename}{NO_COLOR}',
-                  flush=True)
+            print(prefix, f"{RED_COLOR}Overwriting {filename}{NO_COLOR}", flush=True)
         else:
-            print(prefix,
-                  f'{BLUE_COLOR}{filename} already exists. Skip{NO_COLOR}',
-                  flush=True)
+            print(
+                prefix,
+                f"{BLUE_COLOR}{filename} already exists. Skip{NO_COLOR}",
+                flush=True,
+            )
             write = False
     return write
 
@@ -181,29 +177,29 @@ def my_mwrfits(
     dets : list[str], optional
         Detector or detector-set identifiers.
     """
-    hline = '----------------------------------------------------------------'
-    if ftype == 'B':
+    hline = "----------------------------------------------------------------"
+    if ftype == "B":
         comments = [
-            'Beam Window Function B(l)',
-            'Compatible with Healpix (synfast, smoothing, ...) and PolSpice',
-            'To be squared before applying to power spectrum',
-            '  C_map(l) = C_sky(l) * B(l)^2 ',
+            "Beam Window Function B(l)",
+            "Compatible with Healpix (synfast, smoothing, ...) and PolSpice",
+            "To be squared before applying to power spectrum",
+            "  C_map(l) = C_sky(l) * B(l)^2 ",
         ]
-    elif ftype == 'B_TEB':
+    elif ftype == "B_TEB":
         comments = [
-            'Beam Window Functions B(l), for T, E and B',
-            'Compatible with Healpix (synfast, smoothing, ...) and PolSpice',
-            'To be squared before applying to power spectrum',
-            '  C_TT_map(l) = C_TT_sky(l) * B_T(l)^2 ',
-            '  C_EE_map(l) = C_EE_sky(l) * B_E(l)^2 ',
-            '  C_BB_map(l) = C_BB_sky(l) * B_B(l)^2 ',
+            "Beam Window Functions B(l), for T, E and B",
+            "Compatible with Healpix (synfast, smoothing, ...) and PolSpice",
+            "To be squared before applying to power spectrum",
+            "  C_TT_map(l) = C_TT_sky(l) * B_T(l)^2 ",
+            "  C_EE_map(l) = C_EE_sky(l) * B_E(l)^2 ",
+            "  C_BB_map(l) = C_BB_sky(l) * B_B(l)^2 ",
         ]
-    elif ftype == 'W':
+    elif ftype == "W":
         comments = [
-            'Beam Window Functions W(l) = B(l)^2',
-            'Applies directly to power spectrum',
-            '  C_map(l) = C_sky(l) * W(l) ',
-            'Includes cross-talk terms',
+            "Beam Window Functions W(l) = B(l)^2",
+            "Applies directly to power spectrum",
+            "  C_map(l) = C_sky(l) * W(l) ",
+            "Includes cross-talk terms",
         ]
     else:
         comments = []
@@ -212,14 +208,13 @@ def my_mwrfits(
     hdu = pyfits.PrimaryHDU(None)
     hhu = hdu.header.set
     hhc = hdu.header.add_comment
-    fdate = datetime.datetime.now().strftime('%Y-%m-%d')
-    hhu('DATE', fdate, comment='Creation date (CCYY-MM-DD) of FITS header')
+    fdate = datetime.datetime.now().strftime("%Y-%m-%d")
+    hhu("DATE", fdate, comment="Creation date (CCYY-MM-DD) of FITS header")
     if extnames is not None:
         nx = len(extnames)
-        hhu('NUMEXT', nx, 'Number of extensions')
+        hhu("NUMEXT", nx, "Number of extensions")
         for xt in range(nx):
-            hhu(f'XTNAME{xt+1}', extnames[xt],
-                f'Name of extension #{xt+1}')
+            hhu(f"XTNAME{xt+1}", extnames[xt], f"Name of extension #{xt+1}")
 
     hhc(hline)
     for mycom in comments:
@@ -230,7 +225,7 @@ def my_mwrfits(
         hhc(hline)
     if dets is not None:
         for id, det in enumerate(dets):
-            hhu(f'DET{id+1}', det, 'Detector (set)')
+            hhu(f"DET{id+1}", det, "Detector (set)")
 
     hdulist = pyfits.HDUList([hdu])
 
@@ -249,9 +244,7 @@ def my_mwrfits(
                 array = np.reshape(array, (nt // repeat, repeat))
             else:
                 fmt = getformat(array)
-            cols.append(pyfits.Column(name=namei,
-                                      format=fmt,
-                                      array=array))
+            cols.append(pyfits.Column(name=namei, format=fmt, array=array))
             if bintable:
                 tbhdu = pyfits.BinTableHDU.from_columns(cols)
             else:
@@ -261,11 +254,10 @@ def my_mwrfits(
             tbhdu.name = extnames[xt]
 
         ncols = len(cols)
-        tbhdu.header['MAX-LPOL'] = (len(data[xt][0]) - 1,
-                                    'Maximum L multipole')
-        tbhdu.header['POLAR'] = (ncols > 1)
-        tbhdu.header['BCROSS'] = (ncols > 4)
-        tbhdu.header['ASYMCL'] = (ncols > 6)
+        tbhdu.header["MAX-LPOL"] = (len(data[xt][0]) - 1, "Maximum L multipole")
+        tbhdu.header["POLAR"] = ncols > 1
+        tbhdu.header["BCROSS"] = ncols > 4
+        tbhdu.header["ASYMCL"] = ncols > 6
 
         tbhdu.header.add_comment(hline)
         for mycom in comments:
@@ -277,10 +269,9 @@ def my_mwrfits(
 
         if isinstance(keys, dict):
             for k, v in list(keys.items()):
-                tbhdu.header[k] = (v)
+                tbhdu.header[k] = v
 
         hdulist.append(tbhdu)
-
 
     # write the file
     hdulist.writeto(filename, overwrite=True)
@@ -288,12 +279,11 @@ def my_mwrfits(
     # checking out the file: just verify we can read it with astropy
     try:
         _ = pyfits.getdata(filename)
-        print(prefix,
-              f'{GREEN_COLOR} checking out {filename}{NO_COLOR}',
-              flush=True)
+        print(prefix, f"{GREEN_COLOR} checking out {filename}{NO_COLOR}", flush=True)
     except Exception as err:
-        raise RuntimeError(f'Failed to load {filename}: {err}') from err
-    
+        raise RuntimeError(f"Failed to load {filename}: {err}") from err
+
+
 # -----------------------------------------------------------------------------
 
 
@@ -311,7 +301,7 @@ def detset2lmax(detset):
     int
         Default maximum multipole.
     """
-    if detset.startswith('0') or detset.startswith('LFI'):
+    if detset.startswith("0") or detset.startswith("LFI"):
         lmax = 4 * 1024
     else:
         lmax = 4 * 2048
@@ -331,15 +321,26 @@ def detset2pol(detset):
     bool
         True if polarized, False otherwise.
     """
-    if '545' in detset or '857' in detset or 'LFI' in detset or '-' in detset:
+    if "545" in detset or "857" in detset or "LFI" in detset or "-" in detset:
         pol = False
     else:
         pol = True
     return pol
 
 
-def q2f(indir, outdir, dets, smax, release=None, full=True, blfile=True,
-        blTEBfile=True, wlfile=True, overwrite=True, do_plot=False):
+def mat2fits(
+    indir,
+    outdir,
+    dets,
+    smax,
+    release=None,
+    full=True,
+    blfile=True,
+    blTEBfile=True,
+    wlfile=True,
+    overwrite=True,
+    do_plot=False,
+):
     """
     Convert QuickPol NPZ output into FITS B_ell and W_ell window function files.
 
@@ -369,76 +370,79 @@ def q2f(indir, outdir, dets, smax, release=None, full=True, blfile=True,
     do_plot : bool, optional
         If True, save simple PNG plots of the window functions.
     """
-    pconv = 'cmbfast'
+    pconv = "cmbfast"
     angle_shift = 0
     force_det = None
-    rhobeam = 'IMO'
-    rhohit = 'IMO'
+    rhobeam = "IMO"
+    rhohit = "IMO"
 
     lmax = min(detset2lmax(dets[0]), detset2lmax(dets[1]))
     pol = detset2pol(dets[0]) and detset2pol(dets[1])
 
-    fz = qp_file(indir, dets, lmax=lmax, smax=smax, angle_shift=angle_shift,
-                 full=full, pconv=pconv, force_det=force_det, release=release,
-                 rhobeam=rhobeam, rhohit=rhohit)
-    print(prefix, '--------------------')
+    fz = qp_file(
+        indir,
+        dets,
+        lmax=lmax,
+        smax=smax,
+        angle_shift=angle_shift,
+        full=full,
+        pconv=pconv,
+        force_det=force_det,
+        release=release,
+        rhobeam=rhobeam,
+        rhohit=rhohit,
+    )
+    print(prefix, "--------------------")
     print(prefix, fz, flush=True)
     try:
         dz1 = np.load(fz, allow_pickle=True)
     except Exception:
-        print(prefix, f'{fz} not found', flush=True)
+        print(prefix, f"{fz} not found", flush=True)
         return
 
     f32 = np.float32
-    bm1 = dz1['beam_mat'].tolist()
-    TT = f32(bm1['TT'])
+    bm1 = dz1["beam_mat"].tolist()
+    TT = f32(bm1["TT"])
     renorm = TT[0, 0, 0]
     TT /= renorm
-    EE = f32(bm1['EE']) / renorm
-    BB = f32(bm1['BB']) / renorm
-    TE = f32(bm1['TE']) / renorm
-    print(prefix,
-          f'{BLUE_COLOR} Renorm-1 = {renorm - 1}{NO_COLOR}',
-          flush=True)
-    wtt = TT[0:lmax + 1, 0, 0]
+    EE = f32(bm1["EE"]) / renorm
+    BB = f32(bm1["BB"]) / renorm
+    TE = f32(bm1["TE"]) / renorm
+    print(prefix, f"{BLUE_COLOR} Renorm-1 = {renorm - 1}{NO_COLOR}", flush=True)
+    wtt = TT[0 : lmax + 1, 0, 0]
     bl = np.sqrt(np.abs(wtt)) * np.sign(wtt)
     imin = np.argmin(bl)
     imax = np.argmax(bl)
-    wee = EE[0:lmax + 1, 1, 1]
-    wbb = BB[0:lmax + 1, 2, 2]
+    wee = EE[0 : lmax + 1, 1, 1]
+    wbb = BB[0 : lmax + 1, 2, 2]
     bl_E = np.sqrt(np.abs(wee)) * np.sign(wee)
     bl_B = np.sqrt(np.abs(wbb)) * np.sign(wbb)
 
     ineg = np.where(bl < 0)[0]
-    print(prefix, 'Max = ', bl[imax], imax)
+    print(prefix, "Max = ", bl[imax], imax)
     if len(ineg) > 0:
-        print(prefix,
-              f'{RED_COLOR} Neg = {ineg[0]} {ineg[-1]}{NO_COLOR}',
-              flush=True)
-    print(prefix, 'Min = ', bl[imin], imin, flush=True)
+        print(prefix, f"{RED_COLOR} Neg = {ineg[0]} {ineg[-1]}{NO_COLOR}", flush=True)
+    print(prefix, "Min = ", bl[imin], imin, flush=True)
 
-    fitsfile_T = os.path.join(
-        outdir, f'Bl_{release}_{dets[0]}x{dets[1]}.fits')
-    fitsfile_TEB = os.path.join(
-        outdir, f'Bl_TEB_{release}_{dets[0]}x{dets[1]}.fits')
-    fitsfile_W = os.path.join(
-        outdir, f'Wl_{release}_{dets[0]}x{dets[1]}.fits')
+    fitsfile_T = os.path.join(outdir, f"Bl_{release}_{dets[0]}x{dets[1]}.fits")
+    fitsfile_TEB = os.path.join(outdir, f"Bl_TEB_{release}_{dets[0]}x{dets[1]}.fits")
+    fitsfile_W = os.path.join(outdir, f"Wl_{release}_{dets[0]}x{dets[1]}.fits")
 
-    fdate = datetime.datetime.now().strftime('%Y-%m-%d')
-    origin = ['Adapted from', fz, f'by {__file__} on {fdate}']
+    fdate = datetime.datetime.now().strftime("%Y-%m-%d")
+    origin = ["Adapted from", fz, f"by {__file__} on {fdate}"]
 
     gaussbeam, sigma = fit_gauss(bl)
     fwhm = np.abs(np.degrees(sigma) * 60 * np.sqrt(8.0 * np.log(2.0)))
 
     # T B(l)
     if blfile and clobber(fitsfile_T, overwrite):
-        extnames = ['WINDOW FUNCTION']
+        extnames = ["WINDOW FUNCTION"]
         my_mwrfits(
             fitsfile_T,
             [[bl]],
-            colnames=[['TEMPERATURE']],
+            colnames=[["TEMPERATURE"]],
             bintable=False,
-            ftype='B',
+            ftype="B",
             extnames=extnames,
             origin=origin,
             dets=dets,
@@ -446,27 +450,27 @@ def q2f(indir, outdir, dets, smax, release=None, full=True, blfile=True,
         if do_plot:
             hdulist = pyfits.open(fitsfile_T)
             plt.figure()
-            plt.gca().set_title(f'{release} {dets[0]} x {dets[1]}')
-            plt.semilogy(hdulist[1].data.field(0), label='T')
+            plt.gca().set_title(f"{release} {dets[0]} x {dets[1]}")
+            plt.semilogy(hdulist[1].data.field(0), label="T")
             ylim = [1e-8, 2]
             plt.plot(gaussbeam, label=f"{fwhm:.2f}' FWHM")
             plt.gca().set_ylim(ylim)
-            plt.legend(loc='best')
-            fn_plot = fitsfile_T.replace('.fits', '.png')
+            plt.legend(loc="best")
+            fn_plot = fitsfile_T.replace(".fits", ".png")
             plt.savefig(fn_plot)
-            print(prefix, 'Plot saved in', fn_plot, flush=True)
+            print(prefix, "Plot saved in", fn_plot, flush=True)
             plt.close()
             hdulist.close()
 
     # T, E, B B(l)
     if blTEBfile and clobber(fitsfile_TEB, overwrite) and pol:
-        extnames = ['WINDOW FUNCTIONS']
+        extnames = ["WINDOW FUNCTIONS"]
         my_mwrfits(
             fitsfile_TEB,
             [[bl, bl_E, bl_B]],
-            colnames=[['T', 'E', 'B']],
+            colnames=[["T", "E", "B"]],
             bintable=False,
-            ftype='B_TEB',
+            ftype="B_TEB",
             extnames=extnames,
             origin=origin,
             dets=dets,
@@ -474,22 +478,22 @@ def q2f(indir, outdir, dets, smax, release=None, full=True, blfile=True,
         if do_plot:
             hdulist = pyfits.open(fitsfile_TEB)
             plt.figure()
-            plt.gca().set_title(f'{release} {dets[0]} x {dets[1]}')
-            for i, lab in enumerate('TEB'):
+            plt.gca().set_title(f"{release} {dets[0]} x {dets[1]}")
+            for i, lab in enumerate("TEB"):
                 plt.semilogy(hdulist[1].data.field(i), label=lab)
             ylim = [1e-8, 2]
             plt.plot(gaussbeam, label=f"{fwhm:.2f}' FWHM")
             plt.gca().set_ylim(ylim)
-            plt.legend(loc='best')
-            fn_plot = fitsfile_TEB.replace('.fits', '.png')
+            plt.legend(loc="best")
+            fn_plot = fitsfile_TEB.replace(".fits", ".png")
             plt.savefig(fn_plot)
-            print(prefix, 'Plot saved in', fn_plot, flush=True)
+            print(prefix, "Plot saved in", fn_plot, flush=True)
             plt.close()
             hdulist.close()
 
     # W(l)
     if wlfile and clobber(fitsfile_W, overwrite) and pol:
-        extnames = ['TT', 'EE', 'BB', 'TE']
+        extnames = ["TT", "EE", "BB", "TE"]
         data = [
             [TT[0:, k1, k2] for k1, k2 in kk],
             [EE[0:, k1, k2] for k1, k2 in kk],
@@ -497,17 +501,17 @@ def q2f(indir, outdir, dets, smax, release=None, full=True, blfile=True,
             [TE[0:, k1, k2] for k1, k2 in kk],
         ]
         colnames = [
-            [extnames[0] + '_2_' + c for c in t3],
-            [extnames[1] + '_2_' + c for c in t3],
-            [extnames[2] + '_2_' + c for c in t3],
-            [extnames[3] + '_2_' + c for c in t3],
+            [extnames[0] + "_2_" + c for c in t3],
+            [extnames[1] + "_2_" + c for c in t3],
+            [extnames[2] + "_2_" + c for c in t3],
+            [extnames[3] + "_2_" + c for c in t3],
         ]
         my_mwrfits(
             fitsfile_W,
             data,
             colnames=colnames,
             bintable=True,
-            ftype='W',
+            ftype="W",
             extnames=extnames,
             origin=origin,
             dets=dets,
@@ -515,20 +519,20 @@ def q2f(indir, outdir, dets, smax, release=None, full=True, blfile=True,
         if do_plot:
             hdulist = pyfits.open(fitsfile_W)
             plt.figure(figsize=[18, 12])
-            plt.gca().set_title(f'{release} {dets[0]} x {dets[1]}')
-            for ifield, field in enumerate(['TT_2_TE', 'TT_2_EE', 'TT_2_BB']):
+            plt.gca().set_title(f"{release} {dets[0]} x {dets[1]}")
+            for ifield, field in enumerate(["TT_2_TE", "TT_2_EE", "TT_2_BB"]):
                 plt.subplot(2, 2, 1 + ifield)
                 plt.plot(hdulist[1].data.field(field).flatten(), label=field)
-                plt.legend(loc='best')
-                plt.gca().axhline(0, color='k')
-            for ifield, field in enumerate(['EE_2_BB']):
+                plt.legend(loc="best")
+                plt.gca().axhline(0, color="k")
+            for ifield, field in enumerate(["EE_2_BB"]):
                 plt.subplot(2, 2, 4 + ifield)
                 plt.plot(hdulist[2].data.field(field).flatten(), label=field)
-                plt.legend(loc='best')
-                plt.gca().axhline(0, color='k')
-            fn_plot = fitsfile_W.replace('.fits', '.png')
+                plt.legend(loc="best")
+                plt.gca().axhline(0, color="k")
+            fn_plot = fitsfile_W.replace(".fits", ".png")
             plt.savefig(fn_plot)
-            print(prefix, 'Plot saved in', fn_plot, flush=True)
+            print(prefix, "Plot saved in", fn_plot, flush=True)
             plt.close()
             hdulist.close()
 
@@ -537,14 +541,14 @@ def q2f(indir, outdir, dets, smax, release=None, full=True, blfile=True,
 # -------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 
-if __name__ == '__main__':
+if __name__ == "__main__":
 
     freqs = [100, 143, 217, 353]
 
     detsets = []
-    for suffix in ['GHz', 'A', 'B']:
+    for suffix in ["GHz", "A", "B"]:
         for freq in freqs:
-            detset = '{:03}{}'.format(freq, suffix)
+            detset = "{:03}{}".format(freq, suffix)
             detsets.append(detset)
 
     detsetpairs = []
@@ -555,17 +559,17 @@ if __name__ == '__main__':
             # if idetset2 < idetset1:
             #     continue
             # No cross spectra between full frequency and detsets
-            if detset1.endswith('GHz') and detset2[-1] in 'AB':
+            if detset1.endswith("GHz") and detset2[-1] in "AB":
                 continue
-            if detset2.endswith('GHz') and detset1[-1] in 'AB':
+            if detset2.endswith("GHz") and detset1[-1] in "AB":
                 continue
             detsetpairs.append((detset1, detset2))
 
     # Single detector and single horn auto spectra
-    for det in list_planck('Planck'):
+    for det in list_planck("Planck"):
         # Single detector
         detsetpairs.append((det, det))
-        if det[-1] in 'aM':
+        if det[-1] in "aM":
             # Single horn
             horn = det[:-1]
             detsetpairs.append((horn, horn))
@@ -573,7 +577,16 @@ if __name__ == '__main__':
     for ipair, detsetpair in enumerate(detsetpairs):
         if ipair % ntask != rank:
             continue
-        q2f(outdir, indir, detsetpair, smax, release=release, full=full,
-            blfile=blfile, blTEBfile=blTEBfile, wlfile=wlfile,
-            overwrite=overwrite, do_plot=do_plot)
-
+        mat2fits(
+            outdir,
+            indir,
+            detsetpair,
+            smax,
+            release=release,
+            full=full,
+            blfile=blfile,
+            blTEBfile=blTEBfile,
+            wlfile=wlfile,
+            overwrite=overwrite,
+            do_plot=do_plot,
+        )
