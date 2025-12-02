@@ -54,3 +54,7 @@ include = [
   "README.md",
   "pyproject.toml",
 ]
+
+[project.scripts]
+qp-pipeline = "qp_planck.qp_pipeline:run_cli"
+qp-detpairs = "scripts.make_detpairs:main"
