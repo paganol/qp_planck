@@ -38,7 +38,7 @@ import scipy.interpolate as inter
 import astropy.io.fits as pyfits
 import healpy as hp
 
-from utilities import (
+from .utilities import (
     load_RIMO,
     list_planck,
     detector_weights,

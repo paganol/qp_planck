@@ -43,7 +43,7 @@ import scipy.optimize
 import astropy.io.fits as pyfits
 import healpy as hp
 
-from utilities import list_planck, qp_file
+from .utilities import list_planck, qp_file
 
 outdir = "../quickpol_output"
 indir = "../quickpol_output"
