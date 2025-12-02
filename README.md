@@ -23,12 +23,6 @@ The original implementation relied on TOAST and internal Planck tooling.
 Here, the code has been minimally modified to remove TOAST dependencies and to
 run as a standalone Python package.
 
-If you use this in a scientific context, please also cite the QuickPol paper:
-
-E. Hivon, S. Mottet, N. Ponthieu,  
-*QuickPol: Fast calculation of effective beam matrices for CMB polarization*,  
-A&A 598, A25 (2017)
-
 ---
 
 ## Installation
@@ -142,4 +136,5 @@ E. Hivon, S. Mottet, N. Ponthieu,
 A&A 598, A25 (2017).
 
 **Planck NPIPE**  
-Planck Collaboration Int. LVII, *NPIPE data processing pipeline* (2020).
+Planck Collaboration Int. LVII, *NPIPE data processing pipeline*,
+A&A 643, A42 (2020).
