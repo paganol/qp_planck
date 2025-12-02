@@ -60,8 +60,8 @@ qp_planck/
     __init__.py       # Public API: load_RIMO, list_planck, qp_file,
                       #             hmap2mat, mat2fits, run_qp_pipeline
 scripts/
-    example_planck.yaml   # Example YAML configuration for running the full pipeline
-    make_detpairs.py      # Helper for generating Planck detset / detector pairs
+    example_planck.yaml          # Example YAML configuration for running the full pipeline
+    make_planck_detpairs.py      # Helper for generating Planck detset / detector pairs
 ```
 
 ---
@@ -132,9 +132,8 @@ If you use this package, please cite:
 
 **QuickPol**  
 E. Hivon, S. Mottet, N. Ponthieu,  
-*QuickPol: Fast calculation of effective beam matrices for CMB polarization*,  
-A&A 598, A25 (2017).
+*QuickPol: Fast calculation of effective beam matrices for CMB polarization*, A&A 598, A25 (2017)
 
 **Planck NPIPE**  
-Planck Collaboration Int. LVII, *NPIPE data processing pipeline*,
-A&A 643, A42 (2020).
+Planck Collaboration Int. LVII, 
+*NPIPE data processing pipeline*, A&A 643, A42 (2020)
