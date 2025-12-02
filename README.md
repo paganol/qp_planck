@@ -37,7 +37,7 @@ After installation, the main package is:
 
 ```text
 qp_planck/
-    qp.py        # QuickPol driver: builds beam matrices and NPZ files
-    qp2fits.py   # NPZ → FITS Bℓ / Wℓ converter
-    utilities.py # RIMO loading, detector lists, filenames, weights
-    __init__.py  # public API: load_RIMO, list_planck, qp_file, qp, qp2fits, ...
+    qp_hmap2mat.py   # QuickPol driver: builds beam matrices and NPZ files
+    qp_mat2fits.py   # NPZ → FITS Bℓ / Wℓ converter
+    utilities.py     # RIMO loading, detector lists, filenames, weights
+    __init__.py      # public API: load_RIMO, list_planck, qp_file, hmap2mat, mat2fits, ...

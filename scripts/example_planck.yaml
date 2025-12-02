@@ -1,0 +1,55 @@
+# qp_pipeline configuration reproducing the old NPIPE QuickPol runs
+
+# --- RIMO files (same as in qp_hmap2mat) -----------------------------------
+rimo_lfi: /g100_work/INF25_litebird_1/lpagano0/beam_windows_planck/inputs/RIMOs/RIMO_LFI_npipe5_symmetrized.fits
+rimo_hfi: /g100_work/INF25_litebird_1/lpagano0/beam_windows_planck/inputs/RIMOs/RIMO_HFI_npipe5v16_symmetrized.fits
+
+# If you have a pre-merged RIMO, you could instead set:
+# rimo: /path/to/merged_RIMO.fits
+
+# --- Beam multipoles & output paths ----------------------------------------
+blmfile: /g100_work/INF25_litebird_1/lpagano0/beam_windows_planck/inputs/beams/blm_{}.fits
+
+outdir: ../quickpol_output   # where NPZ + FITS will be written
+indir: ../quickpol_output    # where NPZs are read from for mat2fits
+
+# --- Physics / algorithm settings ------------------------------------------
+smax: 6
+spin_ref: Pxx
+blm_ref: Dxx
+
+angle_shift: 0.0
+force_det: null              # or e.g. "143-1a" if you want to force a label
+
+release: npipe6v20
+rhobeam: IMO
+rhohit: IMO
+
+test: false                  # false = full pixels, true = sparse sampling
+planet: ""                   # or "Saturn" if you actually want planet deconv
+conserve_memory: true
+overwrite: false             # overwrite existing NPZ + FITS?
+
+# --- FITS / window function outputs ----------------------------------------
+blfile: true                 # scalar Bl(T)
+blTEBfile: true              # Bl(TEB)
+wlfile: true                 # Wl matrices
+do_plot: false               # also make PNG plots of the windows
+
+# --- Detector / detset pairs -----------------------------------------------
+# This MUST match the old __main__ loops if you want identical coverage.
+# The full list is long, so you should generate it with the small helper
+# script below and paste it here.
+detpairs:
+  # EXAMPLES / PLACEHOLDERS ─ replace with full list from helper script
+  - [100GHz, 100GHz]
+  - [100GHz, 143GHz]
+  - [143GHz, 143GHz]
+  - [143A, 143A]
+  - [143A, 143B]
+  # ...
+  # full list should include:
+  #  * all auto/cross among {100, 143, 217, 353} with suffixes Ghz, A, B
+  #    (excluding full-frequency vs A/B mismatches as in the original code)
+  #  * all (det, det) for det in list_planck("Planck")
+  #  * all single-horn pairs (horn, horn) where horn is det[:-1] for det[-1] in {a, M}
