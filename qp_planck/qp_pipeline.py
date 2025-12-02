@@ -36,7 +36,7 @@ prefix = f"{rank:04d} :"
 
 import os
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Dict, Mapping, Optional, Sequence, Tuple, Union
 
 try:
     import yaml
@@ -228,22 +228,6 @@ def run_qp_pipeline(
     config : str or Path or Mapping, optional
         YAML file path or dict providing defaults for all the above.
         Explicit keyword arguments always take precedence.
-
-    Notes
-    -----
-    YAML example:
-
-        rimo_lfi: /path/to/RIMO_LFI_npipe5_symmetrized.fits
-        rimo_hfi: /path/to/RIMO_HFI_npipe5v16_symmetrized.fits
-        outdir: ./quickpol_output
-        smax: 6
-        release: npipe6v20
-        rhobeam: IMO
-        rhohit: IMO
-        detpairs:
-          - [143GHz, 143GHz]
-          - [143A, 143A]
-          - [143A, 143B]
     """
     # ------------------------------------------------------------------
     # Merge YAML config (if any) with explicit kwargs
@@ -252,7 +236,7 @@ def run_qp_pipeline(
     if config is not None:
         cfg = _load_yaml_config(config)
 
-    # Explicit kwargs override config values
+    # Helper: explicit kwargs override config values
     def _get(name, current):
         return current if current is not None else cfg.get(name)
 
@@ -294,12 +278,14 @@ def run_qp_pipeline(
     do_plot = bool(cfg.get("do_plot", do_plot))
 
     # detpairs can also come from config if not passed
-    if not detpairs and "detpairs" in cfg:
-        # YAML will give list of lists or tuples
+    if (not detpairs) and ("detpairs" in cfg):
         detpairs = [tuple(p) for p in cfg["detpairs"]]
 
     if not detpairs:
         raise ValueError("No detector pairs specified (detpairs is empty).")
+
+    # Ensure output directory exists
+    os.makedirs(outdir, exist_ok=True)
 
     # ------------------------------------------------------------------
     # Main loop over detector pairs
@@ -311,7 +297,7 @@ def run_qp_pipeline(
         detset1, detset2 = detpair
         print(prefix, "Processing pair:", detset1, "x", detset2, flush=True)
 
-        # 1) Build beam matrix NPZ via hmap2mat (former program1)
+        # 1) Build beam matrix NPZ via hmap2mat
         hmap2mat(
             rimo_dict,
             detpair,
@@ -331,7 +317,7 @@ def run_qp_pipeline(
             overwrite=overwrite,
         )
 
-        # 2) Convert NPZ → FITS window functions via mat2fits (former q2f)
+        # 2) Convert NPZ → FITS window functions via mat2fits
         mat2fits(
             indir,
             outdir,
@@ -364,8 +350,22 @@ def run_qp_from_yaml(config: Union[str, Path, Mapping]) -> None:
         YAML file path or dict containing all options, including
         a 'detpairs' entry.
     """
-    # detpairs will be taken from config inside run_qp_pipeline
     run_qp_pipeline(detpairs=(), config=config)
 
 
 __all__ = ["run_qp_pipeline", "run_qp_from_yaml"]
+
+
+# -----------------------------------------------------------------------------#
+# CLI entry point: `python -m qp_planck.qp_pipeline <config.yaml>`             #
+# -----------------------------------------------------------------------------#
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) != 2:
+        print("Usage: python -m qp_planck.qp_pipeline <config.yaml>")
+        raise SystemExit(1)
+
+    config_path = sys.argv[1]
+    run_qp_from_yaml(config_path)
