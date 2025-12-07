@@ -152,11 +152,13 @@ def run_qp_pipeline(
     outdir: str = "../quickpol_output",
     indir: Optional[str] = None,
     smax: int = 6,
-    nside: Optional[str] = None,
-    lmax: Optional[str] = None,
+    nside: Optional[int] = None,
+    lmax: Optional[int] = None,
     mmax: int = 10,
     spin_ref: str = "Pxx",
     blm_ref: str = "Dxx",
+    masks: Optional[str] = None,
+    masks_names: Optional[str] = None,
     angle_shift: float = 0.0,
     force_det: Optional[str] = None,
     release: str = "npipe6v20",
@@ -178,100 +180,114 @@ def run_qp_pipeline(
 
     This function coordinates all major QuickPol steps:
 
-        hitmaps + b_lm  →  beam matrices (NPZ)  →  B_ell / W_ell FITS products
+        (hitmaps + b_lm + masks)  →  beam matrices (NPZ)  →  B_ell / W_ell FITS products
 
-    It first loads configuration parameters (from explicit keyword arguments
-    or an optional YAML file), then loops over all detector–set pairs and:
+    The function first loads configuration parameters—either from explicit
+    keyword arguments or from an optional YAML configuration file—then loops
+    over all detector pairs and:
 
-      1. Calls ``hmap2mat`` to compute the beam matrix NPZ file.
-      2. Calls ``mat2fits`` to generate FITS window-function products
-         (B_ell, B_ell^TEB, W_ell) and optional diagnostic plots.
+      1. Calls ``hmap2mat`` to compute the effective beam matrix and metadata.
+      2. Calls ``mat2fits`` to generate FITS window-function products:
+         - B_ell (temperature or temperature+polarization),
+         - B_ell^{TEB},
+         - W_ell (cut-sky window functions),
+         as well as optional diagnostic information.
 
-    Keyword arguments always override the YAML configuration.
+    Explicit keyword arguments always override values provided in the YAML file.
 
     Parameters
     ----------
     detpairs : sequence of (str, str)
-        List of detector or detector-set pairs, e.g.
-        ``[("143-1a", "143-1b"), ("143-2a", "143-2a")]``.
-        If empty, the function attempts to load ``detpairs`` from the YAML config.
+        List of detector pairs, e.g.
+        ``[("143-1a", "143-1b"), ("217-5a", "217-5b")]``.
+        If empty, ``detpairs`` may be loaded from the YAML configuration.
 
-    config : str or Path or mapping, optional
-        YAML configuration file or a Python dictionary.  Values in the YAML file
-        serve as defaults and are overridden by explicit keyword arguments.
+    config : str, Path, or mapping, optional
+        YAML configuration file or a Python dictionary.  Settings from the YAML
+        act as defaults and are overridden by explicit keyword arguments.
 
     rimo, rimo_lfi, rimo_hfi : str, optional
-        Paths to RIMO files.  You may supply one merged RIMO via ``rimo`` or
-        separate LFI/HFI RIMOs.  These may also be specified in the YAML file.
+        Paths to RIMO (Radiometer Instrument Model) files.  Either one merged
+        RIMO may be given via ``rimo`` or separate LFI/HFI RIMOs via
+        ``rimo_lfi`` and ``rimo_hfi``.
 
-    blmfile : str, optional
-        Template for beam multipole filenames (e.g. ``"blm_{}.fits"``).
+    blmfile : str
+        Template for beam multipole filenames, e.g. ``"blm_{}.fits"``.
 
-    momentsdir : str, optional
-        Directory containing detector hit-moment maps (polmoments files).
+    momentsdir : str
+        Directory containing polarization-moment maps (polmoments) and hits.
 
-    outdir : str, optional
-        Directory where NPZ and FITS outputs are written.
+    outdir : str
+        Directory where `.npz` and FITS window-function files are written.
 
-    indir : str, optional
-        Directory where NPZ files are read by ``mat2fits``.
-        If omitted, defaults to ``outdir``.
+    indir : str or None, optional
+        Directory from which ``mat2fits`` reads NPZ files.  
+        If None, defaults to ``outdir``.
 
-    smax : int, optional
-        Maximum spin in the hit matrix and beam computation.
+    smax : int
+        Maximum spin used in hit/moment expansion.
 
-    nside : int or None, optional
-        HEALPix resolution used when building hit matrices.  If None, each
-        detector pair determines its own ``nside`` through QuickPol conventions.
+    nside : int or None
+        HEALPix resolution. If None, ``hmap2mat`` determines it per detector pair.
 
-    lmax : int or None, optional
-        Maximum multipole.  If None, defaults to ``4 * nside`` per detector pair.
+    lmax : int or None
+        Maximum multipole. If None, defaults to ``4 * nside`` inside ``hmap2mat``.
 
     mmax : int, optional
-        Maximum |m| index to load from the beam b_lm files.
+        Maximum |m| index to load from each detector b_lm.
 
     spin_ref : str, optional
         QuickPol reference spin convention (e.g. ``"Pxx"`` or ``"Dxx"``).
 
     blm_ref : str, optional
-        Reference b_lm set inside the beam file.
+        Reference beam inside the beam multipole files.
 
-    angle_shift : float, optional
-        Additional polarization angle shift (degrees).
+    masks : None, str, or dict, optional
+        Mask specification:
+          • ``None`` — full sky (no mask),  
+          • ``str`` — filename of a mask to apply to all detector pairs,  
+        Passed directly to ``hmap2mat`` and interpreted by ``get_all_masks``.
 
-    force_det : str, optional
-        Override detector name when creating output filenames.
+    masks_names : str or sequence of str, optional
+        Optional human-readable mask names for metadata.
 
-    release : str, optional
-        Pipeline version / release tag encoded in filenames.
+    angle_shift : float
+        Additional rotation (degrees) applied to detector polarization angles.
 
-    rhobeam, rhohit : {"IMO", "Ideal"} or float, optional
-        Cross-polarization model parameters.
+    force_det : str or None
+        Override detector name when generating filenames.
 
-    test : bool, optional
-        If True, run in reduced-pixel test mode.
+    release : str
+        Processing or calibration release tag used for filenames.
 
-    planet : str, optional
-        Planet label used in the beam matrix computation.
+    rhobeam, rhohit : {"IMO", "Ideal"} or float
+        Cross-polarization or hit-matrix regularization parameters.
 
-    conserve_memory : bool, optional
-        Reduce memory usage at the cost of extra CPU.
+    test : bool
+        If True, enable reduced test mode and skip expensive operations.
 
-    overwrite : bool, optional
-        If True, overwrite existing NPZ and FITS files.
+    planet : str
+        Planet name used for beam normalization.
 
-    blfile, blTEBfile, wlfile : bool, optional
-        Flags controlling which FITS products are written.
+    conserve_memory : bool
+        Aggressively free intermediate arrays inside ``hmap2mat`` and ``mat2fits``.
+
+    overwrite : bool
+        If True, overwrite existing NPZ or FITS outputs.  
+        If False, existing files cause the corresponding steps to be skipped.
+
+    blfile, blTEBfile, wlfile : bool
+        Flags controlling which FITS window-function products are produced.
 
     Notes
     -----
-    • Argument resolution order is:
+    • Precedence of configuration values is:
 
-        explicit keyword arguments  >  YAML config values  >  built-in defaults
+          explicit keyword arguments  >  YAML config values  >  built-in defaults
 
-    • Parallel execution: each MPI rank processes a subset of detector pairs.
+    • Under MPI, each rank processes a subset of ``detpairs`` independently.
 
-    • This function does not return anything: all results are written to disk.
+    • This function returns nothing: all results are written to disk.
     """
 
     # ------------------------------------------------------------------
@@ -313,6 +329,8 @@ def run_qp_pipeline(
     lmax = int(lmax) if lmax is not None else None
     spin_ref = cfg.get("spin_ref", spin_ref)
     blm_ref = cfg.get("blm_ref", blm_ref)
+    masks = cfg.get("masks", masks)    
+    masks_names = cfg.get("masks_names", masks_names)
     angle_shift = float(cfg.get("angle_shift", angle_shift))
     force_det = cfg.get("force_det", force_det)
     release = cfg.get("release", release)
@@ -359,6 +377,8 @@ def run_qp_pipeline(
             nside=nside,
             lmax=lmax,
             mmax=mmax,
+            masks=masks,
+            masks_names=masks_names,
             angle_shift=angle_shift,
             force_det=force_det,
             release=release,

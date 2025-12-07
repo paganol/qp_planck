@@ -146,7 +146,6 @@ BLUE_COLOR = "\x1b[34;11m"
 MAGENTA_COLOR = "\x1b[35;11m"
 CYAN_COLOR = "\x1b[36;11m"
 
-
 # ==============================================================================
 
 
@@ -242,13 +241,25 @@ def parse_detname(hitgrpfull, detname):
 # -----------------------------------------------------------
 
 
-def get_all_masks(release, dets, lmax=None):
-    """Stub for mask handling: returns isotropic (no-mask) W_l."""
-    masks_names = [None, None]
-    masks = [None, None]
-    w_cutsky = np.ones((3, 3, lmax + 1), dtype=np.float64)
-    masks_means = np.ones((3, 3), dtype=np.float64)
+def get_all_masks(masks, masks_names, release, dets, lmax=None):
+    if masks is None:
+        """Stub for mask handling: returns isotropic (no-mask) W_l."""
+        masks_names = [None, None]
+        masks = [None, None]
+        w_cutsky = np.ones((3, 3, lmax + 1), dtype=np.float64)
+        masks_means = np.ones((3, 3), dtype=np.float64)
+    elif isinstance(masks, str):
+        m = hp.read_map(masks,field=None)
+        if isinstance(m, list) or isinstance(m, tuple):
+            mlist = list(m)
+        else:
+            mlist = [m]
+        masks = [mlist, mlist]
 
+        masks_names = [masks_names,masks_names]
+        w_cutsky = np.ones((3, 3, lmax + 1), dtype=np.float64)
+        masks_means = np.ones((3, 3), dtype=np.float64)
+       
     return masks, masks_names, w_cutsky, masks_means
 
 
@@ -1197,6 +1208,8 @@ def hmap2mat(
     nside=None,
     lmax=None,
     mmax = 10,
+    masks = None,
+    masks_names = None,
     angle_shift=0,
     force_det=None,
     release=None,
@@ -1246,6 +1259,13 @@ def hmap2mat(
         If `None`, defaults to `4 * nside`.
     mmax : int, optional
         Maximum azimuthal index of the beam b_lm to load. Default is 10.
+    masks : None, str, or dict, optional
+        Mask specification:
+          • None → full-sky (no masking),
+          • str → filename of a mask applied to all detector pairs,
+        Passed through `get_all_masks()`.
+    masks_names : None or list, optional
+        Optional human-readable mask names (mainly for metadata).  
     angle_shift : float, optional
         Rotation (degrees) applied to detector polarization angle.
     force_det : str or None, optional
@@ -1314,7 +1334,11 @@ def hmap2mat(
 
         t0 = time.time()
         masks, masks_names, w_cutsky, masks_means = get_all_masks(
-            release, ds, lmax=lmax
+            masks,
+            masks_names,
+            release, 
+            ds, 
+            lmax=lmax,
         )
         savefile = qp_file(
             outdir,
