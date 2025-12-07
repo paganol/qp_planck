@@ -1187,7 +1187,7 @@ def detset2nside(detset):
 
 def hmap2mat(
     RIMO,
-    mytype,
+    detsetpairs,
     blmfile,
     hitgrpfull,
     outdir,
@@ -1223,7 +1223,7 @@ def hmap2mat(
     ----------
     RIMO : dict or FITS HDU
         Radiometer Instrument Model object containing detector metadata.
-    mytype : list or list of lists
+    detsetpairs : list or list of lists
         List of detector–set pairs. Each element should be `[detset1, detset2]`.
         A flat list is interpreted as a single pair.
     blmfile : str
@@ -1276,7 +1276,7 @@ def hmap2mat(
 
     Notes
     -----
-    • This routine loops over all detector–set pairs in `mytype`.  
+    • This routine loops over all detector–set pairs in `detsetpairs`.  
     • Masks are loaded through `get_all_masks()` and incorporated into the 
       cut–sky beam window computation.  
     • The function internally calls:
@@ -1292,10 +1292,10 @@ def hmap2mat(
     thr = 3.0e-3
     pconv = "cmbfast"
 
-    if isinstance(mytype, str):
-        raise RuntimeError(f'mytype cannot be a string: "{mytype}"')
+    if isinstance(detsetpairs, str):
+        raise RuntimeError(f'detsetpairs cannot be a string: "{detsetpairs}"')
     else:
-        ldets = mytype
+        ldets = detsetpairs
         if isinstance(ldets[0], str):
             ldets = [ldets]
 
