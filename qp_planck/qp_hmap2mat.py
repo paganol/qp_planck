@@ -118,7 +118,8 @@ auxdir = "/g100_work/INF25_litebird_1/lpagano0/beam_windows_planck/inputs/"
 fn_rimo_lfi = os.path.join(auxdir, "RIMOs/RIMO_LFI_npipe5_symmetrized.fits")
 fn_rimo_hfi = os.path.join(auxdir, "RIMOs/RIMO_HFI_npipe5v16_symmetrized.fits")
 
-hitgrpfull = os.path.join(auxdir, "polmoments")
+momentsdir = os.path.join(auxdir, "polmoments")
+
 blmdir = os.path.join(auxdir, "beams")
 outdir = "../quickpol_output"
 # blmfile_lfi = blmdir + 'mb_lfi_{}_dx12_smear.alm'
@@ -227,7 +228,7 @@ def my_create_bololist_w8(detset, RIMO):
     return dets, w8, psb, rho
 
 
-def parse_detname(detname):
+def parse_detname(hitgrpfull, detname):
     """Parse detector set name.
 
     For now this is trivial:
@@ -1188,10 +1189,14 @@ def hmap2mat(
     RIMO,
     mytype,
     blmfile,
+    hitgrpfull,
     outdir,
     smax,
     spin_ref,
     blm_ref,
+    nside=None,
+    lmax=None,
+    mmax = 10,
     angle_shift=0,
     force_det=None,
     release=None,
@@ -1202,10 +1207,86 @@ def hmap2mat(
     conserve_memory=True,
     overwrite=False,
 ):
-    """Top-level QuickPol driver for one or more detector-set pairs."""
+    """
+    Compute QuickPol effective beam matrices for one or more detector–set pairs.
+
+    This is the top–level driver that:
+      • determines `nside` and `lmax` (if not provided),
+      • loads beams from `blmfile`,
+      • builds the hit matrices for the detector pair,
+      • computes harmonic‐space beam transfer matrices (TT, TE, EE, BB, TB, EB),
+      • applies sky masks if provided,
+      • and saves the full result (beam matrix, hit matrix, variance matrices, metadata)
+        into a `.npz` file inside `outdir`.
+
+    Parameters
+    ----------
+    RIMO : dict or FITS HDU
+        Radiometer Instrument Model object containing detector metadata.
+    mytype : list or list of lists
+        List of detector–set pairs. Each element should be `[detset1, detset2]`.
+        A flat list is interpreted as a single pair.
+    blmfile : str
+        Path to the file containing the beam multipoles (b_lm) for all detectors.
+    hitgrpfull : dict
+        Mapping from detector names to hit maps / pointing groups.
+    outdir : str
+        Directory where the output `.npz` file will be written.
+    smax : int
+        Maximum spin to include in the hit matrix (e.g. 4 for NPIPE).
+    spin_ref : int
+        Reference spin used in QuickPol conventions.
+    blm_ref : str or None
+        Name of reference beam inside `blmfile`, if applicable.
+    nside : int or None, optional
+        Target Healpix resolution.  
+        If `None`, it is computed as `min(detset2nside(detset1), detset2nside(detset2))`.
+    lmax : int or None, optional
+        Maximum multipole for beam/hit matrices.  
+        If `None`, defaults to `4 * nside`.
+    mmax : int, optional
+        Maximum azimuthal index of the beam b_lm to load. Default is 10.
+    angle_shift : float, optional
+        Rotation (degrees) applied to detector polarization angle.
+    force_det : str or None, optional
+        Override detector name when building the filenames.
+    release : str or None, optional
+        Tag for mask selection or pipeline versioning.
+    rhobeam : float or None, optional
+        Parameter for beam regularization (if used).
+    rhohit : float or None, optional
+        Parameter for hit–matrix regularization (if used).
+    test : bool, optional
+        If True, run in reduced / debug mode and do not save full matrices.
+    planet : str, optional
+        Name of the calibrator planet (e.g. "Saturn").
+    conserve_memory : bool, optional
+        If True, aggressively free temporary arrays during computation.
+    overwrite : bool, optional
+        If False and the output file already exists, the computation is skipped.
+
+    Returns
+    -------
+    None
+        Results are written to disk as a `.npz` file including:
+        - beam_mat: dict of harmonic beam matrices for all CMB types,
+        - hit_mat: hit matrix for the detector pair,
+        - var_matrix, v2_matrix: variance diagnostics,
+        - metadata needed for later QuickPol stages.
+
+    Notes
+    -----
+    • This routine loops over all detector–set pairs in `mytype`.  
+    • Masks are loaded through `get_all_masks()` and incorporated into the 
+      cut–sky beam window computation.  
+    • The function internally calls:
+        - `fill_beam_dict()` for loading b_lm,
+        - `make_hit_matrix()` for scanning information,
+        - `product_pre2()` for beam–matrix construction.
+
+    """
 
     lstep = 10
-    mmax = 10
     # thr = 1.e-3  # initial value
     # thr = 1.e-2  # test
     thr = 3.0e-3
@@ -1225,8 +1306,11 @@ def hmap2mat(
         detset1 = ds[0]
         detset2 = ds[1]
 
-        nside = min(detset2nside(detset1), detset2nside(detset2))
-        lmax = 4 * nside
+        if nside is None:
+            nside = min(detset2nside(detset1), detset2nside(detset2))
+
+        if lmax is None:
+            lmax = 4 * nside
 
         t0 = time.time()
         masks, masks_names, w_cutsky, masks_means = get_all_masks(
@@ -1257,8 +1341,8 @@ def hmap2mat(
         print(prefix, "Writing into %s" % (savefile), flush=True)
 
         # find out relevant scanning information
-        hitgrp1, ds1 = parse_detname(detset1)
-        hitgrp2, ds2 = parse_detname(detset2)
+        hitgrp1, ds1 = parse_detname(hitgrpfull, detset1)
+        hitgrp2, ds2 = parse_detname(hitgrpfull, detset2)
 
         bdict1 = fill_beam_dict(
             RIMO, blmfile, lmax, mmax, ds1, blm_ref, angle_sdeg=angle_shift
@@ -1319,7 +1403,7 @@ def hmap2mat(
         print(prefix, v2_matrix[1])
         print(prefix, v2_matrix[2])
 
-        lshow = 1000
+        lshow = int(1000*lmax/8192)
         print(prefix, lmax, smax, lstep, lshow, flush=True)
 
         beam_mat = dict()
@@ -1450,6 +1534,7 @@ if __name__ == "__main__":
             RIMO,
             detsetpair,
             blmfile,
+            momentsdir,
             outdir,
             smax,
             spin_ref,

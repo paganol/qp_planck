@@ -10,11 +10,17 @@ rimo_hfi: /g100_work/INF25_litebird_1/lpagano0/beam_windows_planck/inputs/RIMOs/
 # --- Beam multipoles & output paths ----------------------------------------
 blmfile: /g100_work/INF25_litebird_1/lpagano0/beam_windows_planck/inputs/beams/blm_{}.fits
 
+# --- Directory with moments ------------------------------------------------
+momentsdir:  /g100_work/INF25_litebird_1/lpagano0/beam_windows_planck/inputs/polmoments
+
 outdir: ../quickpol_output   # where NPZ + FITS will be written
 indir: ../quickpol_output    # where NPZs are read from for mat2fits
 
 # --- Physics / algorithm settings ------------------------------------------
 smax: 6
+nside: null
+lmax: null
+
 spin_ref: Pxx
 blm_ref: Dxx
 
@@ -34,7 +40,6 @@ overwrite: false             # overwrite existing NPZ + FITS?
 blfile: true                 # scalar Bl(T)
 blTEBfile: true              # Bl(TEB)
 wlfile: true                 # Wl matrices
-do_plot: false               # also make PNG plots of the windows
 
 # --- Detector / detset pairs -----------------------------------------------
 # This MUST match the old __main__ loops if you want identical coverage.

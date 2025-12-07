@@ -147,10 +147,14 @@ def run_qp_pipeline(
     rimo_lfi: Optional[str] = None,
     rimo_hfi: Optional[str] = None,
     # Beam & hitmap configuration
-    blmfile: str = "blm_{}.fits",
+    blmfile: str = "inputs/beams/blm_{}.fits",
+    momentsdir: str = "inputs/polmoments",
     outdir: str = "../quickpol_output",
     indir: Optional[str] = None,
     smax: int = 6,
+    nside: Optional[str] = None,
+    lmax: Optional[str] = None,
+    mmax: int = 10,
     spin_ref: str = "Pxx",
     blm_ref: str = "Dxx",
     angle_shift: float = 0.0,
@@ -166,69 +170,110 @@ def run_qp_pipeline(
     blfile: bool = True,
     blTEBfile: bool = True,
     wlfile: bool = True,
-    do_plot: bool = False,
     # Optional YAML configuration
     config: Optional[Union[str, Path, Mapping]] = None,
 ) -> None:
     """
-    Run the full QuickPol-style pipeline:
-      hitmaps + blm  →  beam matrices (NPZ)  →  FITS B_ell / W_ell.
+    Run the full QuickPol pipeline for a list of detector pairs.
 
-    You can configure it either:
-      - by passing keyword arguments directly, or
-      - by providing a YAML file via `config`, whose values will be used
-        as defaults and overridden by explicit keyword arguments.
+    This function coordinates all major QuickPol steps:
+
+        hitmaps + b_lm  →  beam matrices (NPZ)  →  B_ell / W_ell FITS products
+
+    It first loads configuration parameters (from explicit keyword arguments
+    or an optional YAML file), then loops over all detector–set pairs and:
+
+      1. Calls ``hmap2mat`` to compute the beam matrix NPZ file.
+      2. Calls ``mat2fits`` to generate FITS window-function products
+         (B_ell, B_ell^TEB, W_ell) and optional diagnostic plots.
+
+    Keyword arguments always override the YAML configuration.
 
     Parameters
     ----------
     detpairs : sequence of (str, str)
-        List of detector or detset pairs, e.g. [('143A', '143A'), ('143A', '143B')].
+        List of detector or detector-set pairs, e.g.
+        ``[("143-1a", "143-1b"), ("143-2a", "143-2a")]``.
+        If empty, the function attempts to load ``detpairs`` from the YAML config.
+
+    config : str or Path or mapping, optional
+        YAML configuration file or a Python dictionary.  Values in the YAML file
+        serve as defaults and are overridden by explicit keyword arguments.
+
     rimo, rimo_lfi, rimo_hfi : str, optional
-        Paths to RIMO FITS files. You can pass a single merged RIMO via `rimo`,
-        or separate ones via `rimo_lfi` and/or `rimo_hfi`. These may also be
-        supplied in the YAML config:
-          rimo:     /path/to/RIMO.fits
-          rimo_lfi: /path/to/RIMO_LFI_...
-          rimo_hfi: /path/to/RIMO_HFI_...
+        Paths to RIMO files.  You may supply one merged RIMO via ``rimo`` or
+        separate LFI/HFI RIMOs.  These may also be specified in the YAML file.
+
     blmfile : str, optional
-        Template for beam multipole files, e.g. 'blm_{}.fits'.
+        Template for beam multipole filenames (e.g. ``"blm_{}.fits"``).
+
+    momentsdir : str, optional
+        Directory containing detector hit-moment maps (polmoments files).
+
     outdir : str, optional
-        Output directory for NPZ and FITS files.
+        Directory where NPZ and FITS outputs are written.
+
     indir : str, optional
-        Input directory for NPZ files when calling mat2fits.
-        If None, defaults to `outdir`.
+        Directory where NPZ files are read by ``mat2fits``.
+        If omitted, defaults to ``outdir``.
+
     smax : int, optional
-        Maximum spin used in the QuickPol computation.
-    spin_ref : {'Dxx', 'Pxx'}, optional
-        Reference frame for the spin moments (as in original code).
-    blm_ref : {'Dxx', 'Pxx'}, optional
-        Reference frame for the input blm.
+        Maximum spin in the hit matrix and beam computation.
+
+    nside : int or None, optional
+        HEALPix resolution used when building hit matrices.  If None, each
+        detector pair determines its own ``nside`` through QuickPol conventions.
+
+    lmax : int or None, optional
+        Maximum multipole.  If None, defaults to ``4 * nside`` per detector pair.
+
+    mmax : int, optional
+        Maximum |m| index to load from the beam b_lm files.
+
+    spin_ref : str, optional
+        QuickPol reference spin convention (e.g. ``"Pxx"`` or ``"Dxx"``).
+
+    blm_ref : str, optional
+        Reference b_lm set inside the beam file.
+
     angle_shift : float, optional
-        Extra angle shift (degrees) applied in the beam matrix step.
+        Additional polarization angle shift (degrees).
+
     force_det : str, optional
-        Force a particular detector label in filenames (QuickPol convention).
+        Override detector name when creating output filenames.
+
     release : str, optional
-        Release tag used in output filenames (e.g. 'npipe6v20').
-    rhobeam : {'IMO', 'Ideal'} or float, optional
-        Beam cross-polarization model flag (passed to hmap2mat).
-    rhohit : {'IMO', 'Ideal'} or float, optional
-        Hit cross-polarization model flag (passed to hmap2mat).
+        Pipeline version / release tag encoded in filenames.
+
+    rhobeam, rhohit : {"IMO", "Ideal"} or float, optional
+        Cross-polarization model parameters.
+
     test : bool, optional
-        If True, only sample a small fraction of pixels (debug / test mode).
+        If True, run in reduced-pixel test mode.
+
     planet : str, optional
-        Planet name used in deconvolution (if any, e.g. 'Saturn').
+        Planet label used in the beam matrix computation.
+
     conserve_memory : bool, optional
-        If True, process maps in smaller chunks.
+        Reduce memory usage at the cost of extra CPU.
+
     overwrite : bool, optional
-        Overwrite existing NPZ / FITS files.
+        If True, overwrite existing NPZ and FITS files.
+
     blfile, blTEBfile, wlfile : bool, optional
-        Control which FITS outputs are produced (B_ell(T), B_ell(TEB), W_ell).
-    do_plot : bool, optional
-        If True, also produce PNG plots of the window functions.
-    config : str or Path or Mapping, optional
-        YAML file path or dict providing defaults for all the above.
-        Explicit keyword arguments always take precedence.
+        Flags controlling which FITS products are written.
+
+    Notes
+    -----
+    • Argument resolution order is:
+
+        explicit keyword arguments  >  YAML config values  >  built-in defaults
+
+    • Parallel execution: each MPI rank processes a subset of detector pairs.
+
+    • This function does not return anything: all results are written to disk.
     """
+
     # ------------------------------------------------------------------
     # Merge YAML config (if any) with explicit kwargs
     # ------------------------------------------------------------------
@@ -258,9 +303,14 @@ def run_qp_pipeline(
 
     # other options possibly overridden by config
     blmfile = cfg.get("blmfile", blmfile)
+    momentsdir = cfg.get("momentsdir", momentsdir)
     outdir = cfg.get("outdir", outdir)
     indir = cfg.get("indir", indir if indir is not None else outdir)
     smax = int(cfg.get("smax", smax))
+    nside = cfg.get("nside", nside)
+    nside = int(nside) if nside is not None else None
+    lmax = cfg.get("lmax", lmax)
+    lmax = int(lmax) if lmax is not None else None
     spin_ref = cfg.get("spin_ref", spin_ref)
     blm_ref = cfg.get("blm_ref", blm_ref)
     angle_shift = float(cfg.get("angle_shift", angle_shift))
@@ -275,7 +325,6 @@ def run_qp_pipeline(
     blfile = bool(cfg.get("blfile", blfile))
     blTEBfile = bool(cfg.get("blTEBfile", blTEBfile))
     wlfile = bool(cfg.get("wlfile", wlfile))
-    do_plot = bool(cfg.get("do_plot", do_plot))
 
     # detpairs can also come from config if not passed
     if (not detpairs) and ("detpairs" in cfg):
@@ -302,10 +351,14 @@ def run_qp_pipeline(
             rimo_dict,
             detpair,
             blmfile,
+            momentsdir,
             outdir,
             smax,
             spin_ref,
             blm_ref,
+            nside=nside,
+            lmax=lmax,
+            mmax=mmax,
             angle_shift=angle_shift,
             force_det=force_det,
             release=release,
@@ -323,13 +376,13 @@ def run_qp_pipeline(
             outdir,
             detpair,
             smax,
+            lmax=lmax,
             release=release,
             full=not test,
             blfile=blfile,
             blTEBfile=blTEBfile,
             wlfile=wlfile,
             overwrite=overwrite,
-            do_plot=do_plot,
         )
 
 
