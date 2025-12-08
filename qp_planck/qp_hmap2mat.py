@@ -1216,7 +1216,7 @@ def hmap2mat(
     rhobeam="IMO",
     rhohit="IMO",
     test=False,
-    planet="Saturn",
+    planet="",
     conserve_memory=True,
     overwrite=False,
     return_results=False,  # <---- NEW
@@ -1505,7 +1505,6 @@ def hmap2mat(
 
         print(prefix, "Results saved in {}".format(savefile))
 
-        # <---- NEW: store results in memory if requested
         if return_results:
             results_dict[(detset1, detset2)] = {
                 "beam_mat": beam_mat,
@@ -1521,7 +1520,6 @@ def hmap2mat(
         print(prefix, "computations: {:.2f}".format(tend - t2))
         print(prefix, "TOTAL: {:.2f} s".format(tend - t0), flush=True)
 
-    # <---- NEW: final return
     if return_results:
         return results_dict
     return None
