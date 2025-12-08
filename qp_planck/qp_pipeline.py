@@ -157,8 +157,8 @@ def run_qp_pipeline(
     mmax: int = 10,
     spin_ref: str = "Pxx",
     blm_ref: str = "Dxx",
-    masks: Optional[str] = None,
-    masks_names: Optional[str] = None,
+    mask_file: Optional[str] = None,
+    mask_name: Optional[str] = None,
     angle_shift: float = 0.0,
     force_det: Optional[str] = None,
     release: str = "npipe6v20",
@@ -242,13 +242,13 @@ def run_qp_pipeline(
     blm_ref : str, optional
         Reference beam inside the beam multipole files.
 
-    masks : None, str, or dict, optional
+    mask_file : None, str, or dict, optional
         Mask specification:
           • ``None`` — full sky (no mask),  
           • ``str`` — filename of a mask to apply to all detector pairs,  
         Passed directly to ``hmap2mat`` and interpreted by ``get_all_masks``.
 
-    masks_names : str or sequence of str, optional
+    mask_name : str or sequence of str, optional
         Optional human-readable mask names for metadata.
 
     angle_shift : float
@@ -329,8 +329,8 @@ def run_qp_pipeline(
     lmax = int(lmax) if lmax is not None else None
     spin_ref = cfg.get("spin_ref", spin_ref)
     blm_ref = cfg.get("blm_ref", blm_ref)
-    masks = cfg.get("masks", masks)    
-    masks_names = cfg.get("masks_names", masks_names)
+    mask_file = cfg.get("mask_file", mask_file)    
+    mask_name = cfg.get("mask_name", mask_name)
     angle_shift = float(cfg.get("angle_shift", angle_shift))
     force_det = cfg.get("force_det", force_det)
     release = cfg.get("release", release)
@@ -377,8 +377,8 @@ def run_qp_pipeline(
             nside=nside,
             lmax=lmax,
             mmax=mmax,
-            masks=masks,
-            masks_names=masks_names,
+            mask_file=mask_file,
+            mask_name=mask_name,
             angle_shift=angle_shift,
             force_det=force_det,
             release=release,

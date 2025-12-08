@@ -24,8 +24,8 @@ lmax: null
 spin_ref: Pxx
 blm_ref: Dxx
 
-masks: null
-masks_names: null
+mask_file: null
+mask_name: null
 
 angle_shift: 0.0
 force_det: null              # or e.g. "143-1a" if you want to force a label

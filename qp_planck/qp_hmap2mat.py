@@ -241,22 +241,22 @@ def parse_detname(hitgrpfull, detname):
 # -----------------------------------------------------------
 
 
-def get_all_masks(masks, masks_names, release, dets, lmax=None):
-    if masks is None:
+def get_all_masks(mask_file, mask_name, release, dets, lmax=None):
+    if mask_file is None:
         """Stub for mask handling: returns isotropic (no-mask) W_l."""
         masks_names = [None, None]
         masks = [None, None]
         w_cutsky = np.ones((3, 3, lmax + 1), dtype=np.float64)
         masks_means = np.ones((3, 3), dtype=np.float64)
-    elif isinstance(masks, str):
-        m = hp.read_map(masks,field=None)
+    elif isinstance(mask_file, str):
+        m = hp.read_map(mask_file,field=None)
         if isinstance(m, list) or isinstance(m, tuple):
             mlist = list(m)
         else:
             mlist = [m]
         masks = [mlist, mlist]
 
-        masks_names = [masks_names,masks_names]
+        masks_names = [mask_name,mask_name]
         w_cutsky = np.ones((3, 3, lmax + 1), dtype=np.float64)
         masks_means = np.ones((3, 3), dtype=np.float64)
        
@@ -1207,18 +1207,19 @@ def hmap2mat(
     blm_ref,
     nside=None,
     lmax=None,
-    mmax = 10,
-    masks = None,
-    masks_names = None,
+    mmax=10,
+    mask_file=None,
+    mask_name=None,
     angle_shift=0,
     force_det=None,
     release=None,
-    rhobeam=None,
-    rhohit=None,
+    rhobeam="IMO",
+    rhohit="IMO",
     test=False,
     planet="Saturn",
     conserve_memory=True,
     overwrite=False,
+    return_results=False,  # <---- NEW
 ):
     """
     Compute QuickPol effective beam matrices for one or more detector–set pairs.
@@ -1229,8 +1230,9 @@ def hmap2mat(
       • builds the hit matrices for the detector pair,
       • computes harmonic‐space beam transfer matrices (TT, TE, EE, BB, TB, EB),
       • applies sky masks if provided,
-      • and saves the full result (beam matrix, hit matrix, variance matrices, metadata)
-        into a `.npz` file inside `outdir`.
+      • saves the full result (beam matrix, hit matrix, variance matrices, metadata)
+        into a `.npz` file inside `outdir`,
+      • and, optionally, returns all beam and hit matrices in memory.
 
     Parameters
     ----------
@@ -1252,20 +1254,20 @@ def hmap2mat(
     blm_ref : str or None
         Name of reference beam inside `blmfile`, if applicable.
     nside : int or None, optional
-        Target Healpix resolution.  
+        Target Healpix resolution.
         If `None`, it is computed as `min(detset2nside(detset1), detset2nside(detset2))`.
     lmax : int or None, optional
-        Maximum multipole for beam/hit matrices.  
+        Maximum multipole for beam/hit matrices.
         If `None`, defaults to `4 * nside`.
     mmax : int, optional
         Maximum azimuthal index of the beam b_lm to load. Default is 10.
-    masks : None, str, or dict, optional
+    mask_file : None, str, or dict, optional
         Mask specification:
           • None → full-sky (no masking),
           • str → filename of a mask applied to all detector pairs,
         Passed through `get_all_masks()`.
-    masks_names : None or list, optional
-        Optional human-readable mask names (mainly for metadata).  
+    mask_name : None or list, optional
+        Optional human-readable mask name (mainly for metadata).
     angle_shift : float, optional
         Rotation (degrees) applied to detector polarization angle.
     force_det : str or None, optional
@@ -1283,32 +1285,47 @@ def hmap2mat(
     conserve_memory : bool, optional
         If True, aggressively free temporary arrays during computation.
     overwrite : bool, optional
-        If False and the output file already exists, the computation is skipped.
+        If False and the output file already exists, the computation is skipped
+        (unless `return_results=True`, in which case the matrices are recomputed).
+    return_results : bool, optional
+        If True, return a dictionary with beam and hit matrices for all pairs.
+        If False (default), behave as before and return None.
 
     Returns
     -------
-    None
-        Results are written to disk as a `.npz` file including:
-        - beam_mat: dict of harmonic beam matrices for all CMB types,
-        - hit_mat: hit matrix for the detector pair,
-        - var_matrix, v2_matrix: variance diagnostics,
-        - metadata needed for later QuickPol stages.
+    dict or None
+        If `return_results` is False:
+            None. Results are written to disk as `.npz` files including:
+              - beam_mat: dict of harmonic beam matrices for all CMB types,
+              - hit_mat: hit matrix for the detector pair,
+              - var_matrix, v2_matrix: variance diagnostics,
+              - metadata needed for later QuickPol stages.
+
+        If `return_results` is True:
+            A dictionary keyed by `(detset1, detset2)` with values:
+              {
+                  "beam_mat": beam_mat,
+                  "hit_mat": hit_matrix,
+                  "var_matrix": var_matrix,
+                  "v2_matrix": v2_matrix,
+                  "nbad1": nbad1,
+                  "nbad2": nbad2,
+                  "skip": skip,
+              }
+            for each processed detector pair.
 
     Notes
     -----
-    • This routine loops over all detector–set pairs in `detsetpairs`.  
-    • Masks are loaded through `get_all_masks()` and incorporated into the 
-      cut–sky beam window computation.  
+    • This routine loops over all detector–set pairs in `detsetpairs`.
+    • Masks are loaded through `get_all_masks()` and incorporated into the
+      cut–sky beam window computation.
     • The function internally calls:
         - `fill_beam_dict()` for loading b_lm,
         - `make_hit_matrix()` for scanning information,
         - `product_pre2()` for beam–matrix construction.
-
     """
 
     lstep = 10
-    # thr = 1.e-3  # initial value
-    # thr = 1.e-2  # test
     thr = 3.0e-3
     pconv = "cmbfast"
 
@@ -1322,6 +1339,9 @@ def hmap2mat(
     print(prefix, "rhobeam, rhohit: ", rhobeam, rhohit)
     print(prefix, "detectors: ", ldets, flush=True)
 
+    # <---- NEW: container for in-memory results
+    results_dict = {} if return_results else None
+
     for ds in ldets:
         detset1 = ds[0]
         detset2 = ds[1]
@@ -1334,10 +1354,10 @@ def hmap2mat(
 
         t0 = time.time()
         masks, masks_names, w_cutsky, masks_means = get_all_masks(
-            masks,
-            masks_names,
-            release, 
-            ds, 
+            mask_file,
+            mask_name,
+            release,
+            ds,
             lmax=lmax,
         )
         savefile = qp_file(
@@ -1354,7 +1374,8 @@ def hmap2mat(
             rhohit=rhohit,
         )
 
-        if os.path.isfile(savefile) and not overwrite:
+        # Only skip if we do NOT need to return results
+        if os.path.isfile(savefile) and not overwrite and not return_results:
             print(prefix, "{} exists, skipping...".format(savefile))
             continue
 
@@ -1415,11 +1436,8 @@ def hmap2mat(
         )
 
         print(prefix, "sub pixel 1 Var matrix")
-        # D_00++ + D_00--
         print(prefix, var_matrix[0, 0, 0, 0] + var_matrix[0, 0, 1, 1])
-        # D_22++ + D_22--
         print(prefix, var_matrix[1, 1, 0, 0] + var_matrix[1, 1, 1, 1])
-        # D_-2-2++ + D_-2-2--
         print(prefix, var_matrix[2, 2, 0, 0] + var_matrix[2, 2, 1, 1])
 
         print(prefix, "sub pixel 2 Var matrix")
@@ -1427,11 +1445,10 @@ def hmap2mat(
         print(prefix, v2_matrix[1])
         print(prefix, v2_matrix[2])
 
-        lshow = int(1000*lmax/8192)
+        lshow = int(1000 * lmax / 8192)
         print(prefix, lmax, smax, lstep, lshow, flush=True)
 
         beam_mat = dict()
-        # ctypes_in = ['TT']
         ctypes_in = ["TT", "TE", "EE", "BB", "TB", "EB"]
         wxx = product_pre2(
             bdict1,
@@ -1488,9 +1505,26 @@ def hmap2mat(
 
         print(prefix, "Results saved in {}".format(savefile))
 
+        # <---- NEW: store results in memory if requested
+        if return_results:
+            results_dict[(detset1, detset2)] = {
+                "beam_mat": beam_mat,
+                "hit_mat": hit_matrix,
+                "var_matrix": var_matrix,
+                "v2_matrix": v2_matrix,
+                "nbad1": nbad1,
+                "nbad2": nbad2,
+                "skip": skip,
+            }
+
         tend = time.time()
         print(prefix, "computations: {:.2f}".format(tend - t2))
         print(prefix, "TOTAL: {:.2f} s".format(tend - t0), flush=True)
+
+    # <---- NEW: final return
+    if return_results:
+        return results_dict
+    return None
 
 
 # ==============================================================================
