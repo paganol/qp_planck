@@ -36,6 +36,9 @@ from .utilities import (
     list_planck,
     detector_weights,
     qp_file,
+    detset2nside,
+    detset2pol, 
+    detset2lmax,
 )
 
 from .qp_hmap2mat import hmap2mat
@@ -46,6 +49,9 @@ __all__ = [
     "list_planck",
     "detector_weights",
     "qp_file",
+    "detset2nside",
+    "detset2pol",
+    "detset2lmax",
     "hmap2mat",
     "mat2fits",
 ]
