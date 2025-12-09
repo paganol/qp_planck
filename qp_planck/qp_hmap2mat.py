@@ -118,7 +118,8 @@ auxdir = "/g100_work/INF25_litebird_1/lpagano0/beam_windows_planck/inputs/"
 fn_rimo_lfi = os.path.join(auxdir, "RIMOs/RIMO_LFI_npipe5_symmetrized.fits")
 fn_rimo_hfi = os.path.join(auxdir, "RIMOs/RIMO_HFI_npipe5v16_symmetrized.fits")
 
-hitgrpfull = os.path.join(auxdir, "polmoments")
+momentsdir = os.path.join(auxdir, "polmoments")
+
 blmdir = os.path.join(auxdir, "beams")
 outdir = "../quickpol_output"
 # blmfile_lfi = blmdir + 'mb_lfi_{}_dx12_smear.alm'
@@ -133,8 +134,12 @@ smax = 6
 planet = ""
 rhobeam = "IMO"
 rhohit = "IMO"
-# test = False
-test = True  # Only sample a small fraction of the pixels
+
+# pixel_undersampling controls the pixel skip factor:
+#   None -> no undersampling (equivalent to old test=False, skip=1)
+#   power-of-4 integer (1, 4, 16, 64, ...) -> undersample by that factor
+pixel_undersampling = 64  # Only sample a small fraction of the pixels in __main__
+
 conserve_memory = False
 
 NO_COLOR = "\x1b[0m"
@@ -144,7 +149,6 @@ YELLOW_COLOR = "\x1b[33;11m"
 BLUE_COLOR = "\x1b[34;11m"
 MAGENTA_COLOR = "\x1b[35;11m"
 CYAN_COLOR = "\x1b[36;11m"
-
 
 # ==============================================================================
 
@@ -227,7 +231,7 @@ def my_create_bololist_w8(detset, RIMO):
     return dets, w8, psb, rho
 
 
-def parse_detname(detname):
+def parse_detname(hitgrpfull, detname):
     """Parse detector set name.
 
     For now this is trivial:
@@ -241,12 +245,24 @@ def parse_detname(detname):
 # -----------------------------------------------------------
 
 
-def get_all_masks(release, dets, lmax=None):
-    """Stub for mask handling: returns isotropic (no-mask) W_l."""
-    masks_names = [None, None]
-    masks = [None, None]
-    w_cutsky = np.ones((3, 3, lmax + 1), dtype=np.float64)
-    masks_means = np.ones((3, 3), dtype=np.float64)
+def get_all_masks(mask_file, mask_name, release, dets, lmax=None):
+    if mask_file is None:
+        """Stub for mask handling: returns isotropic (no-mask) W_l."""
+        masks_names = [None, None]
+        masks = [None, None]
+        w_cutsky = np.ones((3, 3, lmax + 1), dtype=np.float64)
+        masks_means = np.ones((3, 3), dtype=np.float64)
+    elif isinstance(mask_file, str):
+        m = hp.read_map(mask_file, field=None)
+        if isinstance(m, list) or isinstance(m, tuple):
+            mlist = list(m)
+        else:
+            mlist = [m]
+        masks = [mlist, mlist]
+
+        masks_names = [mask_name, mask_name]
+        w_cutsky = np.ones((3, 3, lmax + 1), dtype=np.float64)
+        masks_means = np.ones((3, 3), dtype=np.float64)
 
     return masks, masks_names, w_cutsky, masks_means
 
@@ -838,6 +854,44 @@ def make_hit_vectors(
     return hf, df, d2, nbad
 
 
+# ----------------------------------------------------------------------
+# pixel_undersampling validation helper
+# ----------------------------------------------------------------------
+
+
+def _validate_pixel_undersampling(pixel_undersampling):
+    """
+    Validate pixel_undersampling value.
+
+    Must be None or a positive integer power of 4 (4**k, k >= 0).
+    Returns normalized integer value or None.
+    """
+    if pixel_undersampling is None:
+        return None
+
+    # Handle numpy integer scalars
+    if isinstance(pixel_undersampling, np.generic):
+        pixel_undersampling = int(pixel_undersampling)
+
+    if not isinstance(pixel_undersampling, int):
+        raise ValueError(
+            "pixel_undersampling must be None or an integer power of 4 "
+            "(e.g. 1, 4, 16, 64, ...)."
+        )
+    if pixel_undersampling < 1:
+        raise ValueError("pixel_undersampling must be >= 1.")
+
+    p = pixel_undersampling
+    while p % 4 == 0:
+        p //= 4
+    if p != 1:
+        raise ValueError(
+            "pixel_undersampling must be a power of 4 (1, 4, 16, 64, ...)."
+        )
+
+    return pixel_undersampling
+
+
 def make_hit_matrix(
     RIMO,
     nside,
@@ -847,7 +901,7 @@ def make_hit_matrix(
     detset2,
     smax,
     spin_ref,
-    test=False,
+    pixel_undersampling=None,
     thr=None,
     angle_shift=0.0,
     savefile="",
@@ -858,6 +912,9 @@ def make_hit_matrix(
     conserve_memory=True,
 ):
     """Compute the hit matrix and associated variance-like terms."""
+    # Validate undersampling factor
+    pixel_undersampling = _validate_pixel_undersampling(pixel_undersampling)
+
     success = False
     if savefile != "":
         sf2 = savefile
@@ -908,12 +965,16 @@ def make_hit_matrix(
         print(
             prefix, "hit matrix: ", np.min(hitmat.real), np.max(hitmat.real), flush=True
         )
-        # qmax = 2 if (test) else nq
+
+        # Number of pixel chunks to process
         qmax = nq
-        if test:
-            skip = 64
-        else:
+
+        # Determine pixel skip factor (undersampling)
+        if pixel_undersampling is None:
             skip = 1
+        else:
+            skip = pixel_undersampling
+
         npq = npix // nq
         nbad_1 = 0
         nbad_2 = 0
@@ -1016,9 +1077,11 @@ def make_hit_matrix(
                 for k, v in enumerate([0, 2, -2]):
                     for i1 in range(nd1):
                         v2mean[k, 0] += np.sum(hv1[i1, 0, v, first:last]) * w1[i1]
-                        v2mean[k, 1] += np.sum(h21[i1, k, first:last]) * w1[i1]
                     for i2 in range(nd2):
                         v2mean[k, 2] += np.sum(hv2[i2, 0, v, first:last]) * w2[i2]
+                    for i1 in range(nd1):
+                        v2mean[k, 1] += np.sum(h21[i1, k, first:last]) * w1[i1]
+                    for i2 in range(nd2):
                         v2mean[k, 3] += np.sum(h22[i2, k, first:last]) * w2[i2]
             t2 = time.time()
             print(
@@ -1186,59 +1249,185 @@ def detset2nside(detset):
 
 def hmap2mat(
     RIMO,
-    mytype,
+    detsetpairs,
     blmfile,
+    hitgrpfull,
     outdir,
     smax,
     spin_ref,
     blm_ref,
+    nside=None,
+    lmax=None,
+    mmax=10,
+    mask_file=None,
+    mask_name=None,
     angle_shift=0,
     force_det=None,
     release=None,
-    rhobeam=None,
-    rhohit=None,
-    test=False,
-    planet="Saturn",
+    rhobeam="IMO",
+    rhohit="IMO",
+    pixel_undersampling=None,
+    planet="",
     conserve_memory=True,
     overwrite=False,
+    return_results=False,  # <---- return in-memory results
 ):
-    """Top-level QuickPol driver for one or more detector-set pairs."""
+    """
+    Compute QuickPol effective beam matrices for one or more detector–set pairs.
+
+    This is the top–level driver that:
+      • determines `nside` and `lmax` (if not provided),
+      • loads beams from `blmfile`,
+      • builds the hit matrices for the detector pair,
+      • computes harmonic‐space beam transfer matrices (TT, TE, EE, BB, TB, EB),
+      • applies sky masks if provided,
+      • saves the full result (beam matrix, hit matrix, variance matrices, metadata)
+        into a `.npz` file inside `outdir`,
+      • and, optionally, returns all beam and hit matrices in memory.
+
+    Parameters
+    ----------
+    RIMO : dict or FITS HDU
+        Radiometer Instrument Model object containing detector metadata.
+    detsetpairs : list or list of lists
+        List of detector–set pairs. Each element should be `[detset1, detset2]`.
+        A flat list is interpreted as a single pair.
+    blmfile : str
+        Path to the file containing the beam multipoles (b_lm) for all detectors.
+    hitgrpfull : dict
+        Mapping from detector names to hit maps / pointing groups.
+    outdir : str
+        Directory where the output `.npz` file will be written.
+    smax : int
+        Maximum spin to include in the hit matrix (e.g. 4 for NPIPE).
+    spin_ref : int
+        Reference spin used in QuickPol conventions.
+    blm_ref : str or None
+        Name of reference beam inside `blmfile`, if applicable.
+    nside : int or None, optional
+        Target Healpix resolution.
+        If `None`, it is computed as `min(detset2nside(detset1), detset2nside(detset2))`.
+    lmax : int or None, optional
+        Maximum multipole for beam/hit matrices.
+        If `None`, defaults to `4 * nside`.
+    mmax : int, optional
+        Maximum azimuthal index of the beam b_lm to load. Default is 10.
+    mask_file : None, str, or dict, optional
+        Mask specification:
+          • None → full-sky (no masking),
+          • str → filename of a mask applied to all detector pairs,
+        Passed through `get_all_masks()`.
+    mask_name : None or list, optional
+        Optional human-readable mask name (mainly for metadata).
+    angle_shift : float, optional
+        Rotation (degrees) applied to detector polarization angle.
+    force_det : str or None, optional
+        Override detector name when building the filenames.
+    release : str or None, optional
+        Tag for mask selection or pipeline versioning.
+    rhobeam : float or None, optional
+        Parameter for beam regularization (if used).
+    rhohit : float or None, optional
+        Parameter for hit–matrix regularization (if used).
+    pixel_undersampling : None or int, optional
+        Controls pixel subsampling in the hit-matrix construction.
+        Must be either:
+          • None (default) → no undersampling (equivalent to old test=False, skip=1)
+          • integer power of 4 (1, 4, 16, 64, ...) → use that as the pixel skip.
+    planet : str, optional
+        Name of the calibrator planet (e.g. "Saturn").
+    conserve_memory : bool, optional
+        If True, aggressively free temporary arrays during computation.
+    overwrite : bool, optional
+        If False and the output file already exists, the computation is skipped
+        (unless `return_results=True`, in which case the matrices are recomputed).
+    return_results : bool, optional
+        If True, return a dictionary with beam and hit matrices for all pairs.
+        If False (default), behave as before and return None.
+
+    Returns
+    -------
+    dict or None
+        If `return_results` is False:
+            None. Results are written to disk as `.npz` files including:
+              - beam_mat: dict of harmonic beam matrices for all CMB types,
+              - hit_mat: hit matrix for the detector pair,
+              - var_matrix, v2_matrix: variance diagnostics,
+              - metadata needed for later QuickPol stages.
+
+        If `return_results` is True:
+            A dictionary keyed by `(detset1, detset2)` with values:
+              {
+                  "beam_mat": beam_mat,
+                  "hit_mat": hit_matrix,
+                  "var_matrix": var_matrix,
+                  "v2_matrix": v2_matrix,
+                  "nbad1": nbad1,
+                  "nbad2": nbad2,
+                  "skip": skip,
+              }
+            for each processed detector pair.
+
+    Notes
+    -----
+    • This routine loops over all detector–set pairs in `detsetpairs`.
+    • Masks are loaded through `get_all_masks()` and incorporated into the
+      cut–sky beam window computation.
+    • The function internally calls:
+        - `fill_beam_dict()` for loading b_lm,
+        - `make_hit_matrix()` for scanning information,
+        - `product_pre2()` for beam–matrix construction.
+    """
 
     lstep = 10
-    mmax = 10
-    # thr = 1.e-3  # initial value
-    # thr = 1.e-2  # test
     thr = 3.0e-3
     pconv = "cmbfast"
 
-    if isinstance(mytype, str):
-        raise RuntimeError(f'mytype cannot be a string: "{mytype}"')
+    # Validate pixel_undersampling once at the top
+    pixel_undersampling = _validate_pixel_undersampling(pixel_undersampling)
+
+    if isinstance(detsetpairs, str):
+        raise RuntimeError(f'detsetpairs cannot be a string: "{detsetpairs}"')
     else:
-        ldets = mytype
+        ldets = detsetpairs
         if isinstance(ldets[0], str):
             ldets = [ldets]
 
     print(prefix, "rhobeam, rhohit: ", rhobeam, rhohit)
     print(prefix, "detectors: ", ldets, flush=True)
 
+    # Container for in-memory results
+    results_dict = {} if return_results else None
+
     for ds in ldets:
         detset1 = ds[0]
         detset2 = ds[1]
 
-        nside = min(detset2nside(detset1), detset2nside(detset2))
-        lmax = 4 * nside
+        if nside is None:
+            nside = min(detset2nside(detset1), detset2nside(detset2))
+
+        if lmax is None:
+            lmax = 4 * nside
 
         t0 = time.time()
         masks, masks_names, w_cutsky, masks_means = get_all_masks(
-            release, ds, lmax=lmax
+            mask_file,
+            mask_name,
+            release,
+            ds,
+            lmax=lmax,
         )
+
+        # full=True means "no undersampling" for qp_file metadata
+        full = pixel_undersampling in (None, 1)
+
         savefile = qp_file(
             outdir,
             ds,
             lmax=lmax,
             smax=smax,
             angle_shift=angle_shift,
-            full=(not test),
+            full=full,
             pconv=pconv,
             force_det=force_det,
             release=release,
@@ -1246,7 +1435,8 @@ def hmap2mat(
             rhohit=rhohit,
         )
 
-        if os.path.isfile(savefile) and not overwrite:
+        # Only skip if we do NOT need to return results
+        if os.path.isfile(savefile) and not overwrite and not return_results:
             print(prefix, "{} exists, skipping...".format(savefile))
             continue
 
@@ -1257,8 +1447,8 @@ def hmap2mat(
         print(prefix, "Writing into %s" % (savefile), flush=True)
 
         # find out relevant scanning information
-        hitgrp1, ds1 = parse_detname(detset1)
-        hitgrp2, ds2 = parse_detname(detset2)
+        hitgrp1, ds1 = parse_detname(hitgrpfull, detset1)
+        hitgrp2, ds2 = parse_detname(hitgrpfull, detset2)
 
         bdict1 = fill_beam_dict(
             RIMO, blmfile, lmax, mmax, ds1, blm_ref, angle_sdeg=angle_shift
@@ -1283,7 +1473,7 @@ def hmap2mat(
             ds2,
             smax,
             spin_ref,
-            test=test,
+            pixel_undersampling=pixel_undersampling,
             thr=thr,
             angle_shift=angle_shift,
             savefile=savefile,
@@ -1307,11 +1497,8 @@ def hmap2mat(
         )
 
         print(prefix, "sub pixel 1 Var matrix")
-        # D_00++ + D_00--
         print(prefix, var_matrix[0, 0, 0, 0] + var_matrix[0, 0, 1, 1])
-        # D_22++ + D_22--
         print(prefix, var_matrix[1, 1, 0, 0] + var_matrix[1, 1, 1, 1])
-        # D_-2-2++ + D_-2-2--
         print(prefix, var_matrix[2, 2, 0, 0] + var_matrix[2, 2, 1, 1])
 
         print(prefix, "sub pixel 2 Var matrix")
@@ -1319,11 +1506,10 @@ def hmap2mat(
         print(prefix, v2_matrix[1])
         print(prefix, v2_matrix[2])
 
-        lshow = 1000
+        lshow = int(1000 * lmax / 8192)
         print(prefix, lmax, smax, lstep, lshow, flush=True)
 
         beam_mat = dict()
-        # ctypes_in = ['TT']
         ctypes_in = ["TT", "TE", "EE", "BB", "TB", "EB"]
         wxx = product_pre2(
             bdict1,
@@ -1356,7 +1542,7 @@ def hmap2mat(
             detset1=detset1,
             detset2=detset2,
             smax=smax,
-            test=test,
+            pixel_undersampling=pixel_undersampling,
             planet=planet,
             ctypes=ctypes_in,
             beam_mat=beam_mat,
@@ -1380,9 +1566,24 @@ def hmap2mat(
 
         print(prefix, "Results saved in {}".format(savefile))
 
+        if return_results:
+            results_dict[(detset1, detset2)] = {
+                "beam_mat": beam_mat,
+                "hit_mat": hit_matrix,
+                "var_matrix": var_matrix,
+                "v2_matrix": v2_matrix,
+                "nbad1": nbad1,
+                "nbad2": nbad2,
+                "skip": skip,
+            }
+
         tend = time.time()
         print(prefix, "computations: {:.2f}".format(tend - t2))
         print(prefix, "TOTAL: {:.2f} s".format(tend - t0), flush=True)
+
+    if return_results:
+        return results_dict
+    return None
 
 
 # ==============================================================================
@@ -1450,6 +1651,7 @@ if __name__ == "__main__":
             RIMO,
             detsetpair,
             blmfile,
+            momentsdir,
             outdir,
             smax,
             spin_ref,
@@ -1457,7 +1659,7 @@ if __name__ == "__main__":
             release=release,
             rhobeam=rhobeam,
             rhohit=rhobeam,
-            test=test,
+            pixel_undersampling=pixel_undersampling,
             planet=planet,
             conserve_memory=conserve_memory,
             overwrite=False,

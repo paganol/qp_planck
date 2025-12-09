@@ -10,13 +10,22 @@ rimo_hfi: /g100_work/INF25_litebird_1/lpagano0/beam_windows_planck/inputs/RIMOs/
 # --- Beam multipoles & output paths ----------------------------------------
 blmfile: /g100_work/INF25_litebird_1/lpagano0/beam_windows_planck/inputs/beams/blm_{}.fits
 
+# --- Directory with moments ------------------------------------------------
+momentsdir:  /g100_work/INF25_litebird_1/lpagano0/beam_windows_planck/inputs/polmoments
+
 outdir: ../quickpol_output   # where NPZ + FITS will be written
 indir: ../quickpol_output    # where NPZs are read from for mat2fits
 
 # --- Physics / algorithm settings ------------------------------------------
 smax: 6
+nside: null
+lmax: null
+
 spin_ref: Pxx
 blm_ref: Dxx
+
+mask_file: null
+mask_name: null
 
 angle_shift: 0.0
 force_det: null              # or e.g. "143-1a" if you want to force a label
@@ -25,16 +34,22 @@ release: npipe6v20
 rhobeam: IMO
 rhohit: IMO
 
-test: false                  # false = full pixels, true = sparse sampling
+# Pixel undersampling:
+#   null  -> full pixels (no undersampling; old test: false)
+#   64    -> sparse sampling like old test: true. 64 means nide 2048-> 256
+pixel_undersampling: null
+
+# Legacy option (now ignored unless pixel_undersampling is unset):
+# test: false
+
 planet: ""                   # or "Saturn" if you actually want planet deconv
-conserve_memory: true
+conserve_memory: false
 overwrite: false             # overwrite existing NPZ + FITS?
 
 # --- FITS / window function outputs ----------------------------------------
 blfile: true                 # scalar Bl(T)
 blTEBfile: true              # Bl(TEB)
 wlfile: true                 # Wl matrices
-do_plot: false               # also make PNG plots of the windows
 
 # --- Detector / detset pairs -----------------------------------------------
 # This MUST match the old __main__ loops if you want identical coverage.

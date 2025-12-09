@@ -37,7 +37,6 @@ import datetime
 import os
 
 import numpy as np
-import matplotlib.pyplot as plt
 import scipy.optimize
 
 import astropy.io.fits as pyfits
@@ -55,7 +54,6 @@ blTEBfile = True
 overwrite = False
 release = "npipe6v20"
 full = False  # False : Only sample a small fraction of the pixels
-do_plot = False
 
 NO_COLOR = "\x1b[0m"
 GREEN_COLOR = "\x1b[32;11m"
@@ -333,13 +331,13 @@ def mat2fits(
     outdir,
     dets,
     smax,
+    lmax=None,
     release=None,
     full=True,
     blfile=True,
     blTEBfile=True,
     wlfile=True,
     overwrite=True,
-    do_plot=False,
 ):
     """
     Convert QuickPol NPZ output into FITS B_ell and W_ell window function files.
@@ -367,8 +365,6 @@ def mat2fits(
         Write W_ell matrices in a binary table.
     overwrite : bool, optional
         Overwrite existing files.
-    do_plot : bool, optional
-        If True, save simple PNG plots of the window functions.
     """
     pconv = "cmbfast"
     angle_shift = 0
@@ -376,7 +372,8 @@ def mat2fits(
     rhobeam = "IMO"
     rhohit = "IMO"
 
-    lmax = min(detset2lmax(dets[0]), detset2lmax(dets[1]))
+    if lmax is None:
+        lmax = min(detset2lmax(dets[0]), detset2lmax(dets[1]))
     pol = detset2pol(dets[0]) and detset2pol(dets[1])
 
     fz = qp_file(
@@ -447,20 +444,6 @@ def mat2fits(
             origin=origin,
             dets=dets,
         )
-        if do_plot:
-            hdulist = pyfits.open(fitsfile_T)
-            plt.figure()
-            plt.gca().set_title(f"{release} {dets[0]} x {dets[1]}")
-            plt.semilogy(hdulist[1].data.field(0), label="T")
-            ylim = [1e-8, 2]
-            plt.plot(gaussbeam, label=f"{fwhm:.2f}' FWHM")
-            plt.gca().set_ylim(ylim)
-            plt.legend(loc="best")
-            fn_plot = fitsfile_T.replace(".fits", ".png")
-            plt.savefig(fn_plot)
-            print(prefix, "Plot saved in", fn_plot, flush=True)
-            plt.close()
-            hdulist.close()
 
     # T, E, B B(l)
     if blTEBfile and clobber(fitsfile_TEB, overwrite) and pol:
@@ -475,21 +458,7 @@ def mat2fits(
             origin=origin,
             dets=dets,
         )
-        if do_plot:
-            hdulist = pyfits.open(fitsfile_TEB)
-            plt.figure()
-            plt.gca().set_title(f"{release} {dets[0]} x {dets[1]}")
-            for i, lab in enumerate("TEB"):
-                plt.semilogy(hdulist[1].data.field(i), label=lab)
-            ylim = [1e-8, 2]
-            plt.plot(gaussbeam, label=f"{fwhm:.2f}' FWHM")
-            plt.gca().set_ylim(ylim)
-            plt.legend(loc="best")
-            fn_plot = fitsfile_TEB.replace(".fits", ".png")
-            plt.savefig(fn_plot)
-            print(prefix, "Plot saved in", fn_plot, flush=True)
-            plt.close()
-            hdulist.close()
+
 
     # W(l)
     if wlfile and clobber(fitsfile_W, overwrite) and pol:
@@ -516,25 +485,6 @@ def mat2fits(
             origin=origin,
             dets=dets,
         )
-        if do_plot:
-            hdulist = pyfits.open(fitsfile_W)
-            plt.figure(figsize=[18, 12])
-            plt.gca().set_title(f"{release} {dets[0]} x {dets[1]}")
-            for ifield, field in enumerate(["TT_2_TE", "TT_2_EE", "TT_2_BB"]):
-                plt.subplot(2, 2, 1 + ifield)
-                plt.plot(hdulist[1].data.field(field).flatten(), label=field)
-                plt.legend(loc="best")
-                plt.gca().axhline(0, color="k")
-            for ifield, field in enumerate(["EE_2_BB"]):
-                plt.subplot(2, 2, 4 + ifield)
-                plt.plot(hdulist[2].data.field(field).flatten(), label=field)
-                plt.legend(loc="best")
-                plt.gca().axhline(0, color="k")
-            fn_plot = fitsfile_W.replace(".fits", ".png")
-            plt.savefig(fn_plot)
-            print(prefix, "Plot saved in", fn_plot, flush=True)
-            plt.close()
-            hdulist.close()
 
 
 # ------------------------------------------------------------------------------
@@ -588,5 +538,4 @@ if __name__ == "__main__":
             blTEBfile=blTEBfile,
             wlfile=wlfile,
             overwrite=overwrite,
-            do_plot=do_plot,
         )

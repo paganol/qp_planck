@@ -147,18 +147,24 @@ def run_qp_pipeline(
     rimo_lfi: Optional[str] = None,
     rimo_hfi: Optional[str] = None,
     # Beam & hitmap configuration
-    blmfile: str = "blm_{}.fits",
+    blmfile: str = "inputs/beams/blm_{}.fits",
+    momentsdir: str = "inputs/polmoments",
     outdir: str = "../quickpol_output",
     indir: Optional[str] = None,
     smax: int = 6,
+    nside: Optional[int] = None,
+    lmax: Optional[int] = None,
+    mmax: int = 10,
     spin_ref: str = "Pxx",
     blm_ref: str = "Dxx",
+    mask_file: Optional[str] = None,
+    mask_name: Optional[str] = None,
     angle_shift: float = 0.0,
     force_det: Optional[str] = None,
     release: str = "npipe6v20",
     rhobeam: str = "IMO",
     rhohit: str = "IMO",
-    test: bool = False,
+    pixel_undersampling: Optional[int] = None,
     planet: str = "",
     conserve_memory: bool = True,
     overwrite: bool = False,
@@ -166,69 +172,128 @@ def run_qp_pipeline(
     blfile: bool = True,
     blTEBfile: bool = True,
     wlfile: bool = True,
-    do_plot: bool = False,
     # Optional YAML configuration
     config: Optional[Union[str, Path, Mapping]] = None,
 ) -> None:
     """
-    Run the full QuickPol-style pipeline:
-      hitmaps + blm  →  beam matrices (NPZ)  →  FITS B_ell / W_ell.
+    Run the full QuickPol pipeline for a list of detector pairs.
 
-    You can configure it either:
-      - by passing keyword arguments directly, or
-      - by providing a YAML file via `config`, whose values will be used
-        as defaults and overridden by explicit keyword arguments.
+    This function coordinates all major QuickPol steps:
+
+        (hitmaps + b_lm + masks)  →  beam matrices (NPZ)  →  B_ell / W_ell FITS products
+
+    The function first loads configuration parameters—either from explicit
+    keyword arguments or from an optional YAML configuration file—then loops
+    over all detector pairs and:
+
+      1. Calls ``hmap2mat`` to compute the effective beam matrix and metadata.
+      2. Calls ``mat2fits`` to generate FITS window-function products:
+         - B_ell (temperature or temperature+polarization),
+         - B_ell^{TEB},
+         - W_ell (cut-sky window functions),
+         as well as optional diagnostic information.
+
+    Explicit keyword arguments always override values provided in the YAML file.
 
     Parameters
     ----------
     detpairs : sequence of (str, str)
-        List of detector or detset pairs, e.g. [('143A', '143A'), ('143A', '143B')].
+        List of detector pairs, e.g.
+        ``[("143-1a", "143-1b"), ("217-5a", "217-5b")]``.
+        If empty, ``detpairs`` may be loaded from the YAML configuration.
+
+    config : str, Path, or mapping, optional
+        YAML configuration file or a Python dictionary.  Settings from the YAML
+        act as defaults and are overridden by explicit keyword arguments.
+
     rimo, rimo_lfi, rimo_hfi : str, optional
-        Paths to RIMO FITS files. You can pass a single merged RIMO via `rimo`,
-        or separate ones via `rimo_lfi` and/or `rimo_hfi`. These may also be
-        supplied in the YAML config:
-          rimo:     /path/to/RIMO.fits
-          rimo_lfi: /path/to/RIMO_LFI_...
-          rimo_hfi: /path/to/RIMO_HFI_...
-    blmfile : str, optional
-        Template for beam multipole files, e.g. 'blm_{}.fits'.
-    outdir : str, optional
-        Output directory for NPZ and FITS files.
-    indir : str, optional
-        Input directory for NPZ files when calling mat2fits.
-        If None, defaults to `outdir`.
-    smax : int, optional
-        Maximum spin used in the QuickPol computation.
-    spin_ref : {'Dxx', 'Pxx'}, optional
-        Reference frame for the spin moments (as in original code).
-    blm_ref : {'Dxx', 'Pxx'}, optional
-        Reference frame for the input blm.
-    angle_shift : float, optional
-        Extra angle shift (degrees) applied in the beam matrix step.
-    force_det : str, optional
-        Force a particular detector label in filenames (QuickPol convention).
-    release : str, optional
-        Release tag used in output filenames (e.g. 'npipe6v20').
-    rhobeam : {'IMO', 'Ideal'} or float, optional
-        Beam cross-polarization model flag (passed to hmap2mat).
-    rhohit : {'IMO', 'Ideal'} or float, optional
-        Hit cross-polarization model flag (passed to hmap2mat).
-    test : bool, optional
-        If True, only sample a small fraction of pixels (debug / test mode).
-    planet : str, optional
-        Planet name used in deconvolution (if any, e.g. 'Saturn').
-    conserve_memory : bool, optional
-        If True, process maps in smaller chunks.
-    overwrite : bool, optional
-        Overwrite existing NPZ / FITS files.
-    blfile, blTEBfile, wlfile : bool, optional
-        Control which FITS outputs are produced (B_ell(T), B_ell(TEB), W_ell).
-    do_plot : bool, optional
-        If True, also produce PNG plots of the window functions.
-    config : str or Path or Mapping, optional
-        YAML file path or dict providing defaults for all the above.
-        Explicit keyword arguments always take precedence.
+        Paths to RIMO (Radiometer Instrument Model) files.  Either one merged
+        RIMO may be given via ``rimo`` or separate LFI/HFI RIMOs via
+        ``rimo_lfi`` and ``rimo_hfi``.
+
+    blmfile : str
+        Template for beam multipole filenames, e.g. ``"blm_{}.fits"``.
+
+    momentsdir : str
+        Directory containing polarization-moment maps (polmoments) and hits.
+
+    outdir : str
+        Directory where `.npz` and FITS window-function files are written.
+
+    indir : str or None, optional
+        Directory from which ``mat2fits`` reads NPZ files.  
+        If None, defaults to ``outdir``.
+
+    smax : int
+        Maximum spin used in hit/moment expansion.
+
+    nside : int or None
+        HEALPix resolution. If None, ``hmap2mat`` determines it per detector pair.
+
+    lmax : int or None
+        Maximum multipole. If None, defaults to ``4 * nside`` inside ``hmap2mat``.
+
+    mmax : int, optional
+        Maximum |m| index to load from each detector b_lm.
+
+    spin_ref : str, optional
+        QuickPol reference spin convention (e.g. ``"Pxx"`` or ``"Dxx"``).
+
+    blm_ref : str, optional
+        Reference beam inside the beam multipole files.
+
+    mask_file : None, str, or dict, optional
+        Mask specification:
+          • ``None`` — full sky (no mask),  
+          • ``str`` — filename of a mask to apply to all detector pairs,  
+        Passed directly to ``hmap2mat`` and interpreted by ``get_all_masks``.
+
+    mask_name : str or sequence of str, optional
+        Optional human-readable mask names for metadata.
+
+    angle_shift : float
+        Additional rotation (degrees) applied to detector polarization angles.
+
+    force_det : str or None
+        Override detector name when generating filenames.
+
+    release : str
+        Processing or calibration release tag used for filenames.
+
+    rhobeam, rhohit : {"IMO", "Ideal"} or float
+        Cross-polarization or hit-matrix regularization parameters.
+
+    pixel_undersampling : None or int
+        Pixel undersampling factor used in the hit-matrix step. Must be either:
+          • ``None`` (default) — no undersampling (all pixels used), or
+          • a positive integer power of 4 (1, 4, 16, 64, ...).
+        The special case ``pixel_undersampling=64`` reproduces the old
+        ``test=True`` behaviour (skip every 64th pixel).
+
+    planet : str
+        Planet name used for beam normalization.
+
+    conserve_memory : bool
+        Aggressively free intermediate arrays inside ``hmap2mat`` and ``mat2fits``.
+
+    overwrite : bool
+        If True, overwrite existing NPZ or FITS outputs.  
+        If False, existing files cause the corresponding steps to be skipped.
+
+    blfile, blTEBfile, wlfile : bool
+        Flags controlling which FITS window-function products are produced.
+
+    Notes
+    -----
+    • Precedence of configuration values is:
+
+          explicit keyword arguments  >  YAML config values  >  built-in defaults
+
+    • Under MPI, each rank processes a subset of ``detpairs`` independently.
+
+    • This function returns nothing: all results are written to disk.
     """
+
     # ------------------------------------------------------------------
     # Merge YAML config (if any) with explicit kwargs
     # ------------------------------------------------------------------
@@ -258,24 +323,40 @@ def run_qp_pipeline(
 
     # other options possibly overridden by config
     blmfile = cfg.get("blmfile", blmfile)
+    momentsdir = cfg.get("momentsdir", momentsdir)
     outdir = cfg.get("outdir", outdir)
     indir = cfg.get("indir", indir if indir is not None else outdir)
     smax = int(cfg.get("smax", smax))
+    nside = cfg.get("nside", nside)
+    nside = int(nside) if nside is not None else None
+    lmax = cfg.get("lmax", lmax)
+    lmax = int(lmax) if lmax is not None else None
     spin_ref = cfg.get("spin_ref", spin_ref)
     blm_ref = cfg.get("blm_ref", blm_ref)
+    mask_file = cfg.get("mask_file", mask_file)
+    mask_name = cfg.get("mask_name", mask_name)
     angle_shift = float(cfg.get("angle_shift", angle_shift))
     force_det = cfg.get("force_det", force_det)
     release = cfg.get("release", release)
     rhobeam = cfg.get("rhobeam", rhobeam)
     rhohit = cfg.get("rhohit", rhohit)
-    test = bool(cfg.get("test", test))
+
+    # New: pixel_undersampling can be set in config.
+    pixel_undersampling = cfg.get("pixel_undersampling", pixel_undersampling)
+
+    # Backward compatibility: old 'test' flag in YAML
+    # If pixel_undersampling is not specified and test==True,
+    # mimic old behaviour (undersampling factor 64).
+    test_cfg = cfg.get("test", None)
+    if pixel_undersampling is None and test_cfg is True:
+        pixel_undersampling = 64
+
     planet = cfg.get("planet", planet)
     conserve_memory = bool(cfg.get("conserve_memory", conserve_memory))
     overwrite = bool(cfg.get("overwrite", overwrite))
     blfile = bool(cfg.get("blfile", blfile))
     blTEBfile = bool(cfg.get("blTEBfile", blTEBfile))
     wlfile = bool(cfg.get("wlfile", wlfile))
-    do_plot = bool(cfg.get("do_plot", do_plot))
 
     # detpairs can also come from config if not passed
     if (not detpairs) and ("detpairs" in cfg):
@@ -286,6 +367,9 @@ def run_qp_pipeline(
 
     # Ensure output directory exists
     os.makedirs(outdir, exist_ok=True)
+
+    # full = True means "no undersampling" for mat2fits metadata
+    full_flag = pixel_undersampling in (None, 1)
 
     # ------------------------------------------------------------------
     # Main loop over detector pairs
@@ -302,16 +386,22 @@ def run_qp_pipeline(
             rimo_dict,
             detpair,
             blmfile,
+            momentsdir,
             outdir,
             smax,
             spin_ref,
             blm_ref,
+            nside=nside,
+            lmax=lmax,
+            mmax=mmax,
+            mask_file=mask_file,
+            mask_name=mask_name,
             angle_shift=angle_shift,
             force_det=force_det,
             release=release,
             rhobeam=rhobeam,
             rhohit=rhohit,
-            test=test,
+            pixel_undersampling=pixel_undersampling,
             planet=planet,
             conserve_memory=conserve_memory,
             overwrite=overwrite,
@@ -323,13 +413,13 @@ def run_qp_pipeline(
             outdir,
             detpair,
             smax,
+            lmax=lmax,
             release=release,
-            full=not test,
+            full=full_flag,
             blfile=blfile,
             blTEBfile=blTEBfile,
             wlfile=wlfile,
             overwrite=overwrite,
-            do_plot=do_plot,
         )
 
 
