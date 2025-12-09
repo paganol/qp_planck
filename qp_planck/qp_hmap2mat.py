@@ -134,8 +134,12 @@ smax = 6
 planet = ""
 rhobeam = "IMO"
 rhohit = "IMO"
-# test = False
-test = True  # Only sample a small fraction of the pixels
+
+# pixel_undersampling controls the pixel skip factor:
+#   None -> no undersampling (equivalent to old test=False, skip=1)
+#   power-of-4 integer (1, 4, 16, 64, ...) -> undersample by that factor
+pixel_undersampling = 64  # Only sample a small fraction of the pixels in __main__
+
 conserve_memory = False
 
 NO_COLOR = "\x1b[0m"
@@ -249,17 +253,17 @@ def get_all_masks(mask_file, mask_name, release, dets, lmax=None):
         w_cutsky = np.ones((3, 3, lmax + 1), dtype=np.float64)
         masks_means = np.ones((3, 3), dtype=np.float64)
     elif isinstance(mask_file, str):
-        m = hp.read_map(mask_file,field=None)
+        m = hp.read_map(mask_file, field=None)
         if isinstance(m, list) or isinstance(m, tuple):
             mlist = list(m)
         else:
             mlist = [m]
         masks = [mlist, mlist]
 
-        masks_names = [mask_name,mask_name]
+        masks_names = [mask_name, mask_name]
         w_cutsky = np.ones((3, 3, lmax + 1), dtype=np.float64)
         masks_means = np.ones((3, 3), dtype=np.float64)
-       
+
     return masks, masks_names, w_cutsky, masks_means
 
 
@@ -850,6 +854,44 @@ def make_hit_vectors(
     return hf, df, d2, nbad
 
 
+# ----------------------------------------------------------------------
+# pixel_undersampling validation helper
+# ----------------------------------------------------------------------
+
+
+def _validate_pixel_undersampling(pixel_undersampling):
+    """
+    Validate pixel_undersampling value.
+
+    Must be None or a positive integer power of 4 (4**k, k >= 0).
+    Returns normalized integer value or None.
+    """
+    if pixel_undersampling is None:
+        return None
+
+    # Handle numpy integer scalars
+    if isinstance(pixel_undersampling, np.generic):
+        pixel_undersampling = int(pixel_undersampling)
+
+    if not isinstance(pixel_undersampling, int):
+        raise ValueError(
+            "pixel_undersampling must be None or an integer power of 4 "
+            "(e.g. 1, 4, 16, 64, ...)."
+        )
+    if pixel_undersampling < 1:
+        raise ValueError("pixel_undersampling must be >= 1.")
+
+    p = pixel_undersampling
+    while p % 4 == 0:
+        p //= 4
+    if p != 1:
+        raise ValueError(
+            "pixel_undersampling must be a power of 4 (1, 4, 16, 64, ...)."
+        )
+
+    return pixel_undersampling
+
+
 def make_hit_matrix(
     RIMO,
     nside,
@@ -859,7 +901,7 @@ def make_hit_matrix(
     detset2,
     smax,
     spin_ref,
-    test=False,
+    pixel_undersampling=None,
     thr=None,
     angle_shift=0.0,
     savefile="",
@@ -870,6 +912,9 @@ def make_hit_matrix(
     conserve_memory=True,
 ):
     """Compute the hit matrix and associated variance-like terms."""
+    # Validate undersampling factor
+    pixel_undersampling = _validate_pixel_undersampling(pixel_undersampling)
+
     success = False
     if savefile != "":
         sf2 = savefile
@@ -920,12 +965,16 @@ def make_hit_matrix(
         print(
             prefix, "hit matrix: ", np.min(hitmat.real), np.max(hitmat.real), flush=True
         )
-        # qmax = 2 if (test) else nq
+
+        # Number of pixel chunks to process
         qmax = nq
-        if test:
-            skip = 64
-        else:
+
+        # Determine pixel skip factor (undersampling)
+        if pixel_undersampling is None:
             skip = 1
+        else:
+            skip = pixel_undersampling
+
         npq = npix // nq
         nbad_1 = 0
         nbad_2 = 0
@@ -1028,9 +1077,11 @@ def make_hit_matrix(
                 for k, v in enumerate([0, 2, -2]):
                     for i1 in range(nd1):
                         v2mean[k, 0] += np.sum(hv1[i1, 0, v, first:last]) * w1[i1]
-                        v2mean[k, 1] += np.sum(h21[i1, k, first:last]) * w1[i1]
                     for i2 in range(nd2):
                         v2mean[k, 2] += np.sum(hv2[i2, 0, v, first:last]) * w2[i2]
+                    for i1 in range(nd1):
+                        v2mean[k, 1] += np.sum(h21[i1, k, first:last]) * w1[i1]
+                    for i2 in range(nd2):
                         v2mean[k, 3] += np.sum(h22[i2, k, first:last]) * w2[i2]
             t2 = time.time()
             print(
@@ -1215,11 +1266,11 @@ def hmap2mat(
     release=None,
     rhobeam="IMO",
     rhohit="IMO",
-    test=False,
+    pixel_undersampling=None,
     planet="",
     conserve_memory=True,
     overwrite=False,
-    return_results=False,  # <---- NEW
+    return_results=False,  # <---- return in-memory results
 ):
     """
     Compute QuickPol effective beam matrices for one or more detector–set pairs.
@@ -1278,8 +1329,11 @@ def hmap2mat(
         Parameter for beam regularization (if used).
     rhohit : float or None, optional
         Parameter for hit–matrix regularization (if used).
-    test : bool, optional
-        If True, run in reduced / debug mode and do not save full matrices.
+    pixel_undersampling : None or int, optional
+        Controls pixel subsampling in the hit-matrix construction.
+        Must be either:
+          • None (default) → no undersampling (equivalent to old test=False, skip=1)
+          • integer power of 4 (1, 4, 16, 64, ...) → use that as the pixel skip.
     planet : str, optional
         Name of the calibrator planet (e.g. "Saturn").
     conserve_memory : bool, optional
@@ -1329,6 +1383,9 @@ def hmap2mat(
     thr = 3.0e-3
     pconv = "cmbfast"
 
+    # Validate pixel_undersampling once at the top
+    pixel_undersampling = _validate_pixel_undersampling(pixel_undersampling)
+
     if isinstance(detsetpairs, str):
         raise RuntimeError(f'detsetpairs cannot be a string: "{detsetpairs}"')
     else:
@@ -1339,7 +1396,7 @@ def hmap2mat(
     print(prefix, "rhobeam, rhohit: ", rhobeam, rhohit)
     print(prefix, "detectors: ", ldets, flush=True)
 
-    # <---- NEW: container for in-memory results
+    # Container for in-memory results
     results_dict = {} if return_results else None
 
     for ds in ldets:
@@ -1360,13 +1417,17 @@ def hmap2mat(
             ds,
             lmax=lmax,
         )
+
+        # full=True means "no undersampling" for qp_file metadata
+        full = pixel_undersampling in (None, 1)
+
         savefile = qp_file(
             outdir,
             ds,
             lmax=lmax,
             smax=smax,
             angle_shift=angle_shift,
-            full=(not test),
+            full=full,
             pconv=pconv,
             force_det=force_det,
             release=release,
@@ -1412,7 +1473,7 @@ def hmap2mat(
             ds2,
             smax,
             spin_ref,
-            test=test,
+            pixel_undersampling=pixel_undersampling,
             thr=thr,
             angle_shift=angle_shift,
             savefile=savefile,
@@ -1481,7 +1542,7 @@ def hmap2mat(
             detset1=detset1,
             detset2=detset2,
             smax=smax,
-            test=test,
+            pixel_undersampling=pixel_undersampling,
             planet=planet,
             ctypes=ctypes_in,
             beam_mat=beam_mat,
@@ -1598,7 +1659,7 @@ if __name__ == "__main__":
             release=release,
             rhobeam=rhobeam,
             rhohit=rhobeam,
-            test=test,
+            pixel_undersampling=pixel_undersampling,
             planet=planet,
             conserve_memory=conserve_memory,
             overwrite=False,

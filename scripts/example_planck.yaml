@@ -34,9 +34,16 @@ release: npipe6v20
 rhobeam: IMO
 rhohit: IMO
 
-test: false                  # false = full pixels, true = sparse sampling
+# Pixel undersampling:
+#   null  -> full pixels (no undersampling; old test: false)
+#   64    -> sparse sampling like old test: true. 64 means nide 2048-> 256
+pixel_undersampling: null
+
+# Legacy option (now ignored unless pixel_undersampling is unset):
+# test: false
+
 planet: ""                   # or "Saturn" if you actually want planet deconv
-conserve_memory: true
+conserve_memory: false
 overwrite: false             # overwrite existing NPZ + FITS?
 
 # --- FITS / window function outputs ----------------------------------------

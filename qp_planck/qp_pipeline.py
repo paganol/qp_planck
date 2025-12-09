@@ -164,7 +164,7 @@ def run_qp_pipeline(
     release: str = "npipe6v20",
     rhobeam: str = "IMO",
     rhohit: str = "IMO",
-    test: bool = False,
+    pixel_undersampling: Optional[int] = None,
     planet: str = "",
     conserve_memory: bool = True,
     overwrite: bool = False,
@@ -263,8 +263,12 @@ def run_qp_pipeline(
     rhobeam, rhohit : {"IMO", "Ideal"} or float
         Cross-polarization or hit-matrix regularization parameters.
 
-    test : bool
-        If True, enable reduced test mode and skip expensive operations.
+    pixel_undersampling : None or int
+        Pixel undersampling factor used in the hit-matrix step. Must be either:
+          • ``None`` (default) — no undersampling (all pixels used), or
+          • a positive integer power of 4 (1, 4, 16, 64, ...).
+        The special case ``pixel_undersampling=64`` reproduces the old
+        ``test=True`` behaviour (skip every 64th pixel).
 
     planet : str
         Planet name used for beam normalization.
@@ -329,14 +333,24 @@ def run_qp_pipeline(
     lmax = int(lmax) if lmax is not None else None
     spin_ref = cfg.get("spin_ref", spin_ref)
     blm_ref = cfg.get("blm_ref", blm_ref)
-    mask_file = cfg.get("mask_file", mask_file)    
+    mask_file = cfg.get("mask_file", mask_file)
     mask_name = cfg.get("mask_name", mask_name)
     angle_shift = float(cfg.get("angle_shift", angle_shift))
     force_det = cfg.get("force_det", force_det)
     release = cfg.get("release", release)
     rhobeam = cfg.get("rhobeam", rhobeam)
     rhohit = cfg.get("rhohit", rhohit)
-    test = bool(cfg.get("test", test))
+
+    # New: pixel_undersampling can be set in config.
+    pixel_undersampling = cfg.get("pixel_undersampling", pixel_undersampling)
+
+    # Backward compatibility: old 'test' flag in YAML
+    # If pixel_undersampling is not specified and test==True,
+    # mimic old behaviour (undersampling factor 64).
+    test_cfg = cfg.get("test", None)
+    if pixel_undersampling is None and test_cfg is True:
+        pixel_undersampling = 64
+
     planet = cfg.get("planet", planet)
     conserve_memory = bool(cfg.get("conserve_memory", conserve_memory))
     overwrite = bool(cfg.get("overwrite", overwrite))
@@ -353,6 +367,9 @@ def run_qp_pipeline(
 
     # Ensure output directory exists
     os.makedirs(outdir, exist_ok=True)
+
+    # full = True means "no undersampling" for mat2fits metadata
+    full_flag = pixel_undersampling in (None, 1)
 
     # ------------------------------------------------------------------
     # Main loop over detector pairs
@@ -384,7 +401,7 @@ def run_qp_pipeline(
             release=release,
             rhobeam=rhobeam,
             rhohit=rhohit,
-            test=test,
+            pixel_undersampling=pixel_undersampling,
             planet=planet,
             conserve_memory=conserve_memory,
             overwrite=overwrite,
@@ -398,7 +415,7 @@ def run_qp_pipeline(
             smax,
             lmax=lmax,
             release=release,
-            full=not test,
+            full=full_flag,
             blfile=blfile,
             blTEBfile=blTEBfile,
             wlfile=wlfile,
