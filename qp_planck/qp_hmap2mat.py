@@ -43,6 +43,7 @@ from .utilities import (
     list_planck,
     detector_weights,
     qp_file,
+    detset2nside,
 )
 
 """
@@ -1237,25 +1238,15 @@ def product_pre2(
 
 # ==============================================================================
 
-
-def detset2nside(detset):
-    """Map a detset string to an appropriate nside."""
-    if detset.startswith("0") or detset.startswith("LFI"):
-        nside = 1024
-    else:
-        nside = 2048
-    return nside
-
-
 def hmap2mat(
     RIMO,
     detsetpairs,
     blmfile,
     hitgrpfull,
     outdir,
-    smax,
-    spin_ref,
-    blm_ref,
+    smax=6,
+    spin_ref="Pxx",
+    blm_ref="Dxx",
     nside=None,
     lmax=None,
     mmax=10,
@@ -1299,11 +1290,11 @@ def hmap2mat(
     outdir : str
         Directory where the output `.npz` file will be written.
     smax : int
-        Maximum spin to include in the hit matrix (e.g. 4 for NPIPE).
+        Maximum spin to include in the hit matrix, default 6.
     spin_ref : int
-        Reference spin used in QuickPol conventions.
+        Reference spin used in QuickPol conventions, default Pxx
     blm_ref : str or None
-        Name of reference beam inside `blmfile`, if applicable.
+        Name of reference beam inside `blmfile`, default Dxx
     nside : int or None, optional
         Target Healpix resolution.
         If `None`, it is computed as `min(detset2nside(detset1), detset2nside(detset2))`.

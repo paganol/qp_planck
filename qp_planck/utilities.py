@@ -114,6 +114,18 @@ class DetectorData:
 
 
 # ----------------------------------------------------------------------
+# nside and lmax utilities
+# ----------------------------------------------------------------------
+
+def detset2nside(detset):
+    """Map a detset string to an appropriate nside."""
+    if detset.startswith("0") or detset.startswith("LFI"):
+        nside = 1024
+    else:
+        nside = 2048
+    return nside
+
+# ----------------------------------------------------------------------
 # Quaternion utilities
 # ----------------------------------------------------------------------
 
