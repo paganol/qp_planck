@@ -125,6 +125,47 @@ def detset2nside(detset):
         nside = 2048
     return nside
 
+def detset2lmax(detset):
+    """
+    Map a detector set string to a default l_max.
+
+    Parameters
+    ----------
+    detset : str
+        Detector or detector set identifier.
+
+    Returns
+    -------
+    int
+        Default maximum multipole.
+    """
+    if detset.startswith("0") or detset.startswith("LFI"):
+        lmax = 4 * 1024
+    else:
+        lmax = 4 * 2048
+    return lmax
+
+
+def detset2pol(detset):
+    """
+    Decide whether a detector set has polarization information.
+
+    Parameters
+    ----------
+    detset : str
+
+    Returns
+    -------
+    bool
+        True if polarized, False otherwise.
+    """
+    if "545" in detset or "857" in detset or "LFI" in detset or "-" in detset:
+        pol = False
+    else:
+        pol = True
+    return pol
+
+
 # ----------------------------------------------------------------------
 # Quaternion utilities
 # ----------------------------------------------------------------------
