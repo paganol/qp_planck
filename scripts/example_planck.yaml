@@ -1,17 +1,17 @@
 # qp_pipeline configuration reproducing the old NPIPE QuickPol runs
 
 # --- RIMO files (same as in qp_hmap2mat) -----------------------------------
-rimo_lfi: /g100_work/INF25_litebird_1/lpagano0/beam_windows_planck/inputs/RIMOs/RIMO_LFI_npipe5_symmetrized.fits
-rimo_hfi: /g100_work/INF25_litebird_1/lpagano0/beam_windows_planck/inputs/RIMOs/RIMO_HFI_npipe5v16_symmetrized.fits
+rimo_lfi: /g100_work/INF26_litebird_1/lpagano0/beam_windows_planck/inputs/RIMOs/RIMO_LFI_npipe5_symmetrized.fits
+rimo_hfi: /g100_work/INF26_litebird_1/lpagano0/beam_windows_planck/inputs/RIMOs/RIMO_HFI_npipe5v16_symmetrized.fits
 
 # If you have a pre-merged RIMO, you could instead set:
 # rimo: /path/to/merged_RIMO.fits
 
 # --- Beam multipoles & output paths ----------------------------------------
-blmfile: /g100_work/INF25_litebird_1/lpagano0/beam_windows_planck/inputs/beams/blm_{}.fits
+blmfile: /g100_work/INF26_litebird_1/lpagano0/beam_windows_planck/inputs/beams/blm_{}.fits
 
 # --- Directory with moments ------------------------------------------------
-momentsdir:  /g100_work/INF25_litebird_1/lpagano0/beam_windows_planck/inputs/polmoments
+momentsdir:  /g100_work/INF26_litebird_1/lpagano0/beam_windows_planck/inputs/polmoments
 
 outdir: ../quickpol_output   # where NPZ + FITS will be written
 indir: ../quickpol_output    # where NPZs are read from for mat2fits
@@ -26,6 +26,43 @@ blm_ref: Dxx
 
 mask_file: null
 mask_name: null
+
+# Mask configuration examples:
+# -----------------------------------------------------------------------------
+# 1) One mask for all detector pairs (single string case)
+#    If you set one string for mask_file and one for mask_name,
+#    the same mask is used for every pair in detpairs.
+#
+# mask_file: /g100_work/INF26_litebird_1/lpagano0/beam_windows_planck/inputs/masks/mask_galplane_fsky40_ns128.fits
+# mask_name: galplane_fsky40
+#
+# 2) Per-detpair masks
+#    You can provide a list aligned with detpairs (same length).
+#    Each item can be:
+#      - one string: same mask on both map legs of that pair,
+#      - two strings: [mask_for_leg1, mask_for_leg2].
+#
+# mask_file:
+#   - /g100_work/INF26_litebird_1/lpagano0/beam_windows_planck/inputs/masks/mask_galplane_fsky20_ns128.fits
+#   - /g100_work/INF26_litebird_1/lpagano0/beam_windows_planck/inputs/masks/mask_galplane_fsky40_ns128.fits
+#   - [
+#       /g100_work/INF26_litebird_1/lpagano0/beam_windows_planck/inputs/masks/mask_galplane_fsky40_ns128.fits,
+#       /g100_work/INF26_litebird_1/lpagano0/beam_windows_planck/inputs/masks/mask_galplane_fsky60_ns128.fits,
+#     ]
+# mask_name:
+#   - galplane_fsky20
+#   - galplane_fsky40
+#   - [galplane_fsky40, galplane_fsky60]
+#
+# Optional dict style (keyed by detpair) is also supported:
+# mask_file:
+#   100GHzx100GHz: /path/to/mask_100x100.fits
+#   100GHzx143GHz: /path/to/mask_100x143.fits
+#   default: /path/to/fallback_mask.fits
+# mask_name:
+#   100GHzx100GHz: m100x100
+#   100GHzx143GHz: m100x143
+#   default: mfallback
 
 angle_shift: 0.0
 force_det: null              # or e.g. "143-1a" if you want to force a label

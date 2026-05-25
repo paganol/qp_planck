@@ -16,6 +16,17 @@ Description
 Tools for computing beam window functions for Planck NPIPE using
 QuickPol-inspired logic.
 
+Reference
+---------
+Hivon, E., Mottet, S., & Ponthieu, N. (2017).
+"QuickPol: Fast calculation of effective beam matrices for CMB polarization".
+Astronomy & Astrophysics, 598, A25.
+https://doi.org/10.1051/0004-6361/201629204
+
+In this package, the core matrix computation corresponding to QuickPol Eq. 7
+is implemented in ``qp_hmap2mat.product_pre2``. Other modules provide I/O,
+configuration, and FITS conversion helpers around that core step.
+
 Public API:
 - load_RIMO()    → load instrument model (RIMO) FITS files
 - list_planck()  → list detectors and detector sets

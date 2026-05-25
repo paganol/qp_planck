@@ -9,6 +9,17 @@ This module provides:
 - A helper to construct QuickPol beam matrix filenames.
 
 The code is written to be self-contained for use in a small qp_planck package.
+
+Reference
+---------
+Hivon, E., Mottet, S., & Ponthieu, N. (2017).
+"QuickPol: Fast calculation of effective beam matrices for CMB polarization".
+Astronomy & Astrophysics, 598, A25.
+https://doi.org/10.1051/0004-6361/201629204
+
+This module mainly provides support utilities (RIMO handling, detector lists,
+filename conventions) used by the QuickPol computational core in
+``qp_hmap2mat.py``.
 """
 
 from __future__ import annotations
@@ -666,6 +677,7 @@ def qp_file(
     pconv: str = "cmbfast",
     force_det: Optional[str] = None,
     release: Optional[str] = None,  # kept for compatibility, not used
+    mask_name: Optional[Union[str, Sequence[Optional[str]]]] = None,
     rhobeam: Optional[str] = None,
     rhohit: Optional[str] = None,
 ) -> str:
@@ -693,6 +705,8 @@ def qp_file(
         If not None, add a '_FD<force_det>' tag to the filename.
     release : str, optional
         Reserved for data-release dependent tags (currently unused).
+    mask_name : str or sequence of str, optional
+        Optional mask label(s) to append to the filename metadata.
     rhobeam : {'Ideal', 'IMO'}, optional
         Beam mismatch model label. 'Ideal' -> no tag, 'IMO' -> '_rbIMO'.
     rhohit : {'Ideal', 'IMO'}, optional
@@ -722,6 +736,26 @@ def qp_file(
     else:
         sfd = ""
 
+    def _mask_token(value: object) -> str:
+        token = os.path.basename(str(value).strip())
+        token = os.path.splitext(token)[0]
+        token = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in token)
+        token = token.strip("_")
+        return token or "mask"
+
+    if mask_name is None:
+        smask = ""
+    elif isinstance(mask_name, (list, tuple)):
+        labels = [_mask_token(m) for m in mask_name if m not in (None, "")]
+        if not labels:
+            smask = ""
+        elif len(labels) == 1 or labels[0] == labels[1]:
+            smask = f"_m{labels[0]}"
+        else:
+            smask = f"_m{labels[0]}x{labels[1]}"
+    else:
+        smask = f"_m{_mask_token(mask_name)}"
+
     if rhobeam == "Ideal":
         srb = ""
     elif rhobeam == "IMO":
@@ -747,7 +781,7 @@ def qp_file(
 
     fz = os.path.join(
         outdir,
-        "beam_matrix_{}x{}_l{}_s{}_A{}_{}_{}{}{}{}.npz".format(
+        "beam_matrix_{}x{}_l{}_s{}_A{}_{}_{}{}{}{}{}.npz".format(
             dets[0],
             dets[1],
             str(lmax),
@@ -756,6 +790,7 @@ def qp_file(
             pconv,
             str(int(bool(full))),
             sfd,
+            smask,
             srb,
             srh,
         ),

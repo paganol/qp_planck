@@ -11,6 +11,16 @@ This module provides a convenience wrapper around:
 
 It also supports loading all options from a YAML configuration file.
 
+Reference
+---------
+Hivon, E., Mottet, S., & Ponthieu, N. (2017).
+"QuickPol: Fast calculation of effective beam matrices for CMB polarization".
+Astronomy & Astrophysics, 598, A25.
+https://doi.org/10.1051/0004-6361/201629204
+
+This module is an orchestration layer. The core effective-beam computation
+associated with QuickPol Eq. 7 is performed in ``qp_hmap2mat.product_pre2``.
+
 DISCLAIMER
 ----------
 This file contains code adapted from the Planck NPIPE pipeline:
@@ -36,7 +46,7 @@ prefix = f"{rank:04d} :"
 
 import os
 from pathlib import Path
-from typing import Dict, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 try:
     import yaml
@@ -157,8 +167,8 @@ def run_qp_pipeline(
     mmax: int = 10,
     spin_ref: str = "Pxx",
     blm_ref: str = "Dxx",
-    mask_file: Optional[str] = None,
-    mask_name: Optional[str] = None,
+    mask_file: Optional[Any] = None,
+    mask_name: Optional[Any] = None,
     angle_shift: float = 0.0,
     force_det: Optional[str] = None,
     release: str = "npipe6v20",
@@ -194,6 +204,12 @@ def run_qp_pipeline(
          as well as optional diagnostic information.
 
     Explicit keyword arguments always override values provided in the YAML file.
+
+    Notes
+    -----
+    The scientific matrix computation is delegated to ``hmap2mat`` (see
+    ``qp_hmap2mat.product_pre2`` and QuickPol Eq. 7). This wrapper focuses on
+    configuration resolution, per-detector-pair execution, and product writing.
 
     Parameters
     ----------
@@ -242,14 +258,17 @@ def run_qp_pipeline(
     blm_ref : str, optional
         Reference beam inside the beam multipole files.
 
-    mask_file : None, str, or dict, optional
+    mask_file : None, str, sequence, or dict, optional
         Mask specification:
-          • ``None`` — full sky (no mask),  
-          • ``str`` — filename of a mask to apply to all detector pairs,  
+          • ``None`` — full sky (no mask),
+          • ``str`` — one mask applied to all detector pairs,
+          • ``sequence`` with length ``len(detpairs)`` — one mask spec per pair,
+          • ``dict`` keyed by detector pair (e.g. ``"100GHzx143GHz"``) — mask per pair.
         Passed directly to ``hmap2mat`` and interpreted by ``get_all_masks``.
 
-    mask_name : str or sequence of str, optional
-        Optional human-readable mask names for metadata.
+    mask_name : str, sequence, or dict, optional
+        Optional mask label(s). Supports the same scalar / per-pair formats as
+        ``mask_file``.
 
     angle_shift : float
         Additional rotation (degrees) applied to detector polarization angles.
@@ -371,15 +390,54 @@ def run_qp_pipeline(
     # full = True means "no undersampling" for mat2fits metadata
     full_flag = pixel_undersampling in (None, 1)
 
+    def _select_pair_value(spec: Any, detpair: Tuple[str, str], ipair: int, npairs: int):
+        """Resolve a scalar or per-detpair config value for the current pair."""
+        if spec is None or isinstance(spec, (str, bytes, int, float, bool)):
+            return spec
+
+        if isinstance(spec, Mapping):
+            d1, d2 = detpair
+            keys = [
+                (d1, d2),
+                (d2, d1),
+                f"{d1}x{d2}",
+                f"{d2}x{d1}",
+                f"{d1},{d2}",
+                f"{d2},{d1}",
+                f"{d1}|{d2}",
+                f"{d2}|{d1}",
+                f"{d1} {d2}",
+                f"{d2} {d1}",
+            ]
+            for key in keys:
+                if key in spec:
+                    return spec[key]
+            for key in ("default", "all", "*"):
+                if key in spec:
+                    return spec[key]
+            raise KeyError(f"No entry found for detector pair {d1}x{d2}")
+
+        if isinstance(spec, Sequence):
+            if len(spec) == npairs:
+                return spec[ipair]
+            # Not a per-detpair list: treat it as a direct payload for this pair.
+            return spec
+
+        return spec
+
     # ------------------------------------------------------------------
     # Main loop over detector pairs
     # ------------------------------------------------------------------
+    npairs = len(detpairs)
     for ipair, detpair in enumerate(detpairs):
         if ipair % ntask != rank:
             continue
 
         detset1, detset2 = detpair
         print(prefix, "Processing pair:", detset1, "x", detset2, flush=True)
+
+        pair_mask_file = _select_pair_value(mask_file, detpair, ipair, npairs)
+        pair_mask_name = _select_pair_value(mask_name, detpair, ipair, npairs)
 
         # 1) Build beam matrix NPZ via hmap2mat
         hmap2mat(
@@ -394,8 +452,8 @@ def run_qp_pipeline(
             nside=nside,
             lmax=lmax,
             mmax=mmax,
-            mask_file=mask_file,
-            mask_name=mask_name,
+            mask_file=pair_mask_file,
+            mask_name=pair_mask_name,
             angle_shift=angle_shift,
             force_det=force_det,
             release=release,
@@ -415,6 +473,7 @@ def run_qp_pipeline(
             smax,
             lmax=lmax,
             release=release,
+            mask_name=pair_mask_name,
             full=full_flag,
             blfile=blfile,
             blTEBfile=blTEBfile,
@@ -439,6 +498,11 @@ def run_qp_from_yaml(config: Union[str, Path, Mapping]) -> None:
     config : str or Path or Mapping
         YAML file path or dict containing all options, including
         a 'detpairs' entry.
+
+    Notes
+    -----
+    This helper is equivalent to calling ``run_qp_pipeline(detpairs=(),
+    config=config)``.
     """
     run_qp_pipeline(detpairs=(), config=config)
 
