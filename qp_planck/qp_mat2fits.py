@@ -10,6 +10,16 @@ The original implementation relied on TOAST and internal Planck tooling.
 This version removes TOAST dependencies and is intended to be used as
 a standalone step to convert QuickPol NPZ outputs into FITS window
 function files (B_ell and W_ell).
+
+Reference
+---------
+Hivon, E., Mottet, S., & Ponthieu, N. (2017).
+"QuickPol: Fast calculation of effective beam matrices for CMB polarization".
+Astronomy & Astrophysics, 598, A25.
+https://doi.org/10.1051/0004-6361/201629204
+
+This module converts already-computed effective beam matrices (from the
+QuickPol pipeline core, Eq. 7) into standard FITS beam/window products.
 """
 
 # Optional MPI via mpi4py; fall back to serial execution if not available.
@@ -291,6 +301,7 @@ def mat2fits(
     smax,
     lmax=None,
     release=None,
+    mask_name=None,
     full=True,
     blfile=True,
     blTEBfile=True,
@@ -312,6 +323,8 @@ def mat2fits(
         Maximum spin used in the QuickPol computation (just passed through).
     release : str, optional
         Release tag used in output filenames, e.g. 'npipe6v20'.
+    mask_name : str or sequence of str, optional
+        Optional mask label(s) used in the QuickPol NPZ filename.
     full : bool, optional
         Whether the QuickPol output corresponds to full sampling (used only in
         the NPZ filename construction).
@@ -323,6 +336,15 @@ def mat2fits(
         Write W_ell matrices in a binary table.
     overwrite : bool, optional
         Overwrite existing files.
+
+    Notes
+    -----
+    Input NPZ files are expected to come from ``hmap2mat`` where effective
+    beam matrices are computed using the QuickPol formalism (Hivon+ 2017,
+    Eq. 7). This function then derives delivered B_ell and W_ell products:
+
+    - W_ell is taken from the matrix components,
+    - B_ell is reported as a signed square root of diagonal W_ell terms.
     """
     pconv = "cmbfast"
     angle_shift = 0
@@ -344,6 +366,7 @@ def mat2fits(
         pconv=pconv,
         force_det=force_det,
         release=release,
+        mask_name=mask_name,
         rhobeam=rhobeam,
         rhohit=rhohit,
     )

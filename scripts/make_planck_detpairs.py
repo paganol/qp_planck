@@ -1,7 +1,22 @@
 #!/usr/bin/env python3
+"""
+Build canonical Planck detector-pair lists for QuickPol runs.
+
+This helper script generates auto and cross detector-set combinations that can
+be pasted into a YAML configuration for ``qp_planck.qp_pipeline``.
+
+Reference
+---------
+Hivon, E., Mottet, S., & Ponthieu, N. (2017).
+"QuickPol: Fast calculation of effective beam matrices for CMB polarization".
+Astronomy & Astrophysics, 598, A25.
+https://doi.org/10.1051/0004-6361/201629204
+"""
+
 import numpy as np
 
 def list_planck(detset, good=True, subset=None, extend_857=True, extend_545=False):
+    """Return detector names for a Planck detector set or frequency label."""
     detectors = []
     if subset is None:
         subset = 0
@@ -188,6 +203,7 @@ def list_planck(detset, good=True, subset=None, extend_857=True, extend_545=Fals
 
 
 def build_detpairs():
+    """Construct default detector-set and detector auto/cross pair combinations."""
     freqs = [100, 143, 217, 353]
     detsets = [f"{freq:03}{suffix}"
                for suffix in ["GHz", "A", "B"]

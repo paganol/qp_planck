@@ -1,6 +1,16 @@
 """
 QuickPol driver for Planck NPIPE beam matrices.
 
+This module implements the QuickPol algorithm for computing effective beam matrices
+from beam multipoles and hit counts, with masking support.
+
+Reference
+---------
+Hivon, E., Mottet, S., & Ponthieu, N. (2017).
+"QuickPol: Fast calculation of effective beam matrices for CMB polarization".
+Astronomy & Astrophysics, 598, A25.
+https://doi.org/10.1051/0004-6361/201629204
+
 DISCLAIMER
 ----------
 This file contains code adapted from the Planck NPIPE / QuickPol pipeline:
@@ -247,6 +257,54 @@ def parse_detname(hitgrpfull, detname):
 
 
 def get_all_masks(mask_file, mask_name, release, dets, lmax=None):
+    def _resolve_pair_entry(spec):
+        if not isinstance(spec, dict):
+            return spec
+        d1, d2 = dets
+        keys = [
+            (d1, d2),
+            (d2, d1),
+            f"{d1}x{d2}",
+            f"{d2}x{d1}",
+            f"{d1},{d2}",
+            f"{d2},{d1}",
+            f"{d1}|{d2}",
+            f"{d2}|{d1}",
+            f"{d1} {d2}",
+            f"{d2} {d1}",
+        ]
+        for key in keys:
+            if key in spec:
+                return spec[key]
+        for key in ("default", "all", "*"):
+            if key in spec:
+                return spec[key]
+        raise KeyError(f"No mask entry found for detector pair {d1}x{d2}")
+
+    mask_file = _resolve_pair_entry(mask_file)
+    mask_name = _resolve_pair_entry(mask_name)
+
+    def _read_mask(path):
+        if path is None:
+            return None
+        m = hp.read_map(path, field=None)
+        if isinstance(m, (list, tuple)):
+            return list(m)
+        return [m]
+
+    def _normalize_mask_names(value):
+        if value is None:
+            return [None, None]
+        if isinstance(value, str):
+            return [value, value]
+        if isinstance(value, (list, tuple)):
+            if len(value) == 0:
+                return [None, None]
+            if len(value) == 1:
+                return [value[0], value[0]]
+            return [value[0], value[1]]
+        return [str(value), str(value)]
+
     if mask_file is None:
         """Stub for mask handling: returns isotropic (no-mask) W_l."""
         masks_names = [None, None]
@@ -254,16 +312,35 @@ def get_all_masks(mask_file, mask_name, release, dets, lmax=None):
         w_cutsky = np.ones((3, 3, lmax + 1), dtype=np.float64)
         masks_means = np.ones((3, 3), dtype=np.float64)
     elif isinstance(mask_file, str):
-        m = hp.read_map(mask_file, field=None)
-        if isinstance(m, list) or isinstance(m, tuple):
-            mlist = list(m)
-        else:
-            mlist = [m]
+        mlist = _read_mask(mask_file)
         masks = [mlist, mlist]
-
-        masks_names = [mask_name, mask_name]
+        masks_names = _normalize_mask_names(mask_name)
         w_cutsky = np.ones((3, 3, lmax + 1), dtype=np.float64)
         masks_means = np.ones((3, 3), dtype=np.float64)
+    elif isinstance(mask_file, (list, tuple)):
+        if len(mask_file) == 1:
+            m0 = _read_mask(mask_file[0])
+            masks = [m0, m0]
+        elif len(mask_file) == 2:
+            m0 = _read_mask(mask_file[0])
+            m1 = _read_mask(mask_file[1])
+            if m0 is None and m1 is not None:
+                m0 = m1
+            if m1 is None and m0 is not None:
+                m1 = m0
+            masks = [m0, m1]
+        else:
+            raise RuntimeError(
+                "mask_file sequence must have length 1 or 2 for a detector pair"
+            )
+
+        masks_names = _normalize_mask_names(mask_name)
+        w_cutsky = np.ones((3, 3, lmax + 1), dtype=np.float64)
+        masks_means = np.ones((3, 3), dtype=np.float64)
+    else:
+        raise RuntimeError(
+            "Unsupported mask_file format. Use None, str, dict, or a sequence of length 1/2."
+        )
 
     return masks, masks_names, w_cutsky, masks_means
 
@@ -403,7 +480,43 @@ def fill_beam_dict(RIMO, blmfile, lmax, mmax, detset, blm_ref, angle_sdeg=0.0):
 
 
 def bmat(bdict, l, s, rhobeam=None, verbose=False):
-    """Construct beam matrix (Eq. E.4 in QuickPol) from a blm dictionary."""
+    """
+    Construct beam matrix B_{ell}^{(s)} from beam multipole coefficients.
+
+    Implements Eq. E.4 from Hivon+ (2017) to construct the 3×3 beam matrix
+    for a given multipole ell and spin s from b_lm coefficients.
+
+    Parameters
+    ----------
+    bdict : dict
+        Beam dictionary containing:
+        - 'blm' : array of beam multipoles b_lm (lmax+1, mmax+1, ndb)
+        - 'angle' : detector polarization angle (radians)
+        - 'angle_shift' : additional angle shift (radians)
+        - 'psb' : PSB flag (True/False)
+        - 'w8' : detector weight
+        - 'rho' : cross-pol parameter or IMO value
+        - 'ndb' : number of databases (1 or 3)
+    l : int
+        Spherical harmonic multipole index
+    s : int
+        Spin index
+    rhobeam : {'Ideal', 'IMO'}, optional
+        Cross-polarization model for beam mismatch
+    verbose : bool
+        Print debug information
+
+    Returns
+    -------
+    ndarray
+        3×3 beam matrix B_{ell}^{(s)} (Eq. E.4)
+
+    Notes
+    -----
+    The beam matrix is constructed from beam multipoles using azimuthal
+    expansion around the detector direction. Cross-polarization terms ρ are
+    included based on the specified rhobeam model (Hivon+ 2017, Eq. B.1).
+    """
     mmax = bdict["mmax"]
     ndb = bdict["ndb"]
     sgn = np.array([1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1])[0 : mmax + 1]
@@ -480,14 +593,28 @@ def bmat(bdict, l, s, rhobeam=None, verbose=False):
 
 
 def adjoint(matrix):
-    """Hermitian adjoint (conjugate transpose)."""
+    """
+    Compute the Hermitian adjoint (conjugate transpose) of a matrix.
+    """
     return np.transpose(np.conjugate(matrix))
 
 
 def dots(
     m1, m2, m3=None, m4=None, m5=None, m6=None, m7=None, m8=None, m9=None, m10=None
 ):
-    """Chain of up to 10 matrix multiplications."""
+    """
+    Perform chained matrix multiplications (up to 10 matrices).
+    
+    Parameters
+    ----------
+    m1, m2, ..., m10 : ndarray
+        Matrix operands. m1 and m2 are required; m3-m10 are optional.
+
+    Returns
+    -------
+    ndarray
+        Result of m1 @ m2 @ m3 @ ... @ m10 (where @ denotes matrix product).
+    """
     m = np.dot(m1, m2)
     if m3 is not None:
         m = np.dot(m, m3)
@@ -509,7 +636,31 @@ def dots(
 
 
 def interpolate_matrix(matrix, lmax, lb):
-    """Interpolate a matrix in ell using cubic interpolation."""
+    """
+    Interpolate beam matrix from sparse ell samples to full ell range.
+
+    Uses cubic spline interpolation to compute effective beam matrices at all
+    multipoles from a coarser sampling (Hivon+ 2017, Sect. 3.1, "Extrapolation").
+
+    Parameters
+    ----------
+    matrix : ndarray
+        Beam matrix sampled at indices lb, shape (len(lb), n1, n2)
+    lmax : int
+        Maximum multipole to interpolate to
+    lb : ndarray
+        Array of sampled multipole indices
+
+    Returns
+    -------
+    ndarray
+        Interpolated matrix over full range [0, lmax], shape (lmax+1, n1, n2)
+
+    Notes
+    -----
+    Both real and complex matrices are supported. Interpolation is performed
+    separately on real and imaginary parts for complex data.
+    """
     n1 = np.size(matrix, 1)
     n2 = np.size(matrix, 2)
     kind = "cubic"  # for interp1d
@@ -530,7 +681,38 @@ def interpolate_matrix(matrix, lmax, lb):
 
 
 def deconv_planet(matrix, planet="", w_cutsky=None, masks_means=None):
-    """Optionally deconvolve a planetary beam and apply cut-sky/mask effects."""
+    """
+    Optionally deconvolve a planetary beam and apply sky window corrections.
+
+    This function implements optional corrections to effective beam matrices:
+    - Deconvolution of a calibration planet beam (currently commented out)
+    - Application of cut-sky window functions W_l from masking
+    - Normalization by mean mask values
+
+    Parameters
+    ----------
+    matrix : ndarray
+        Effective beam matrix, shape (lmax+1, 3, 3)
+    planet : str, optional
+        Planet name for deconvolution ('Saturn' supported). Default '' = no deconvolution
+    w_cutsky : ndarray, optional
+        Cut-sky window functions W_l(i,j) for different polarization combinations.
+        Shape (3, 3, lmax+1). If provided, matrix is multiplied by W_l.
+    masks_means : ndarray, optional
+        Mean values of masks for polarization components (3, 3).
+        If provided, matrix is divided by these means.
+
+    Returns
+    -------
+    ndarray
+        Modified effective beam matrix
+
+    Notes
+    -----
+    - Window function correction: matrix(l) *= W_l/masks_means
+    - Planet deconvolution follows Hivon+ (2017) treatment
+    - Currently, w_cutsky and masks_means are typically set to identity (ones)
+    """
     lmax = np.size(matrix, 0) - 1
     n1 = np.size(matrix, 1)
     n2 = np.size(matrix, 2)
@@ -583,7 +765,36 @@ def count_pix(pixels):
 
 
 def apply_hit_masks(ih, masks=None, pixels=None):
-    """Apply hit/mask maps to an inverse hit matrix ih."""
+    """
+    Apply sky mask weighting to the inverse hit matrix.
+
+    Multiplies rows of the inverse hit matrix by mask values to account for
+    partial-sky observations. This implements masking at the scanning level,
+    before final beam matrix construction.
+
+    Parameters
+    ----------
+    ih : ndarray
+        Inverse hit matrix, shape (npix, 3, 3). Rows are [TT, TE/EE, TB/EB].
+    masks : list of arrays, optional
+        Up to 2 mask maps (one or two per detector polarization).
+        - If len(masks)==1: same mask applied to all components
+        - If len(masks)==2: masks[0] for temperature, masks[1] for polarization
+    pixels : tuple
+        (pixel_start, pixel_end, [skip]) indexing into mask and hit matrix
+
+    Returns
+    -------
+    ndarray
+        Modified inverse hit matrix with mask weighting applied
+
+    Notes
+    -----
+    Mask application:
+    - Temperature rows ih[:,0,:] *= mask_t (applied per-component)
+    - Polarization rows ih[:,1:2,:] *= mask_p (applied per-component)
+    - Implements cut-sky weighting at the hit-matrix level
+    """
     if masks is not None:
         nlow_, nhigh_, skip, sample_ = count_pix(pixels)
         lm = len(masks)
@@ -1124,7 +1335,60 @@ def product_pre2(
     w_cutsky=None,
     masks_means=None,
 ):
-    """Compute effective beam matrices for a given set of input C_ell types."""
+    """
+    Compute effective beam matrices from beam multipoles and hit matrices.
+
+    This is the core QuickPol algorithm (Hivon+ 2017, Eq. 7):
+
+    .. math::
+
+        M_{ell,ij}^{(out)} = \sum_{k,l,m} (R^{-1})_{ik}(ell)
+                             B_{ell,kl}^{det1}(s) B_{ell,lm}^{det2*}(s)
+                             (R^{-1})_{mj}(ell)
+
+    where:
+    - M is the effective beam matrix
+    - B are the beam matrices for each detector pair
+    - R^{-1} is the inverse hit (scanning) matrix
+    - The sum is over all spin s and configurations
+
+    Parameters
+    ----------
+    bdict1, bdict2 : list of dict
+        Beam dictionaries for first and second detector(s) in pair.
+        Each dict contains b_lm coefficients and metadata.
+    hit_matrix : ndarray
+        Pre-computed inverse hit (scanning) matrix (lmax+1, 3, 3)
+    lmax : int
+        Maximum multipole
+    smax : int
+        Maximum spin moment in expansion
+    intypes : list of str
+        Input power spectrum types to compute (e.g., ['TT', 'TE', 'EE', 'BB', ...])
+    lstep : int, optional
+        Coarse sampling interval in ell for fast computation (interpolated later)
+    planet : str, optional
+        Planet name for optional deconvolution
+    pconv : str, optional
+        Power spectrum convention ('cmbfast' or 'old')
+    rhobeam : {'Ideal', 'IMO'}, optional
+        Beam cross-polarization model
+    w_cutsky : ndarray, optional
+        Cut-sky window functions (3, 3, lmax+1)
+    masks_means : ndarray, optional
+        Mean mask values per component (3, 3)
+
+    Returns
+    -------
+    ndarray
+        Effective beam matrices for all input types, shape (len(intypes), lmax+1, 3, 3)
+
+    References
+    ----------
+    - Hivon+ 2017, Eq. 7 (main formula)
+    - Hivon+ 2017, Eq. 4-6 (coordinate transformations)
+    - Hivon+ 2017, Sect. 2.2 (power spectrum conventions)
+    """
     # constant matrices
     diag = np.array([[1, 0, 0], [0, 0.5, 0], [0, 0, 0.5]])
     idiag = np.array([[1, 0, 0], [0, 2.0, 0], [0, 0, 2.0]])
@@ -1140,12 +1404,16 @@ def product_pre2(
     airot = adjoint(irot)
     swap12 = np.array([[1, 0, 0], [0, 0, 1], [0, 1, 0]])
 
-    # input C(l) selector
+    # Select input power spectrum components
+    # This constructs the diagonal selector matrix to pick requested C(l) types
+    # and transform to cmbfast convention (Hivon+ 2017, Eq. 4-6)
     mcl_in = np.array([["TT", "TE", "TB"], ["TE", "EE", "EB"], ["TB", "EB", "BB"]])
     nc = len(intypes)
     cpp = np.zeros((nc, 3, 3), dtype=np.complex128)
     for ic, intype in enumerate(intypes):
+        # Selector matrix for this power spectrum type
         mcl = (mcl_in == intype) * 1.0
+        # Transform to requested convention via: R_{conv} * C_l * R_{conv}^{-1}
         cpp[ic] = dots(rot, mcl, arot)
 
     cout = np.zeros((nc, lmax + 1, 3, 3), dtype=np.complex128)
@@ -1303,13 +1571,15 @@ def hmap2mat(
         If `None`, defaults to `4 * nside`.
     mmax : int, optional
         Maximum azimuthal index of the beam b_lm to load. Default is 10.
-    mask_file : None, str, or dict, optional
+    mask_file : None, str, sequence, or dict, optional
         Mask specification:
           • None → full-sky (no masking),
           • str → filename of a mask applied to all detector pairs,
+          • sequence of length 1 or 2 → pair-specific mask payload,
+          • dict keyed by detector pair → pair-specific masks,
         Passed through `get_all_masks()`.
-    mask_name : None or list, optional
-        Optional human-readable mask name (mainly for metadata).
+    mask_name : None, str, sequence, or dict, optional
+        Optional human-readable mask label(s) for metadata / filenames.
     angle_shift : float, optional
         Rotation (degrees) applied to detector polarization angle.
     force_det : str or None, optional
@@ -1422,6 +1692,7 @@ def hmap2mat(
             pconv=pconv,
             force_det=force_det,
             release=release,
+            mask_name=masks_names,
             rhobeam=rhobeam,
             rhohit=rhohit,
         )
